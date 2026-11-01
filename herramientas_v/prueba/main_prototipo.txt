@@ -1,0 +1,104 @@
+def fachadas_ytd(xml):
+    """Diccionario compartido por todos los edificios: materiales de pared y atlas de piezas."""
+    carpeta = config_v.DATOS / "texturas"
+    texturas = {r.stem: (Image.open(r), False) for r in sorted(carpeta.glob("pa_*.png"))}
+    texturas["fa_piezas"] = (Image.open(carpeta / "fachadas.png"), True)
+    rage.escribir_ytd(xml / "bcn_fachadas.ytd.xml", texturas)
+
+
+def colision_edificios(vols, origen, casilla, mundo):
+    """Colisión sencilla: tejado y paredes lisas de cada volumen (los balcones no hacen falta)."""
+    e0, n0 = origen
+    c = casilla / 2
+    v, t = [], []
+    for vol in vols:
+        poli, suelo, techo = vol["poli"], vol["suelo"], vol["techo"]
+        for tri in edificios_v.triangular(poli):
+            base = len(v)
+            v += [(x - e0 - c, y - n0 - c, techo) for x, y in tri]
+            t.append((base, base + 1, base + 2))
+        for anillo in [poli.exterior] + list(poli.interiors):
+            q = np.asarray(anillo.coords)
+            for (ax, ay), (bx, by) in zip(q[:-1], q[1:]):
+                base = len(v)
+                v += [(ax - e0 - c, ay - n0 - c, suelo), (bx - e0 - c, by - n0 - c, suelo),
+                      (bx - e0 - c, by - n0 - c, techo), (ax - e0 - c, ay - n0 - c, techo)]
+                t += [(base, base + 1, base + 2), (base, base + 2, base + 3)]
+    return np.array(v) + mundo, np.array(t)
+
+
+def main():
+    hoja = sys.argv[1]
+    capas, e0h, n1h = cargar_hoja(hoja)
+    partes, info = [], {}
+    for muni in config_v.MUNICIPIOS:  # una hoja puede caer entre dos municipios (Llefià y el Fondo)
+        with open(config_v.DATOS / "catastro" / f"{muni}.pkl", "rb") as fh:
+            d = pickle.load(fh)
+        partes += d["partes"]
+        info.update(d["edificios"])
+    centros = np.array([p["anillos"][0].mean(0) for p in partes])
+    ruta_colores = config_v.DATOS / "texturas" / "colores.json"
+    colores = json.loads(ruta_colores.read_text()) if ruta_colores.exists() else {}
+    ruta_osm = config_v.DATOS / "osm.pkl"
+    calles = None
+    if ruta_osm.exists():
+        with open(ruta_osm, "rb") as fh:
+            calles = edificios_v.arbol_calles(pickle.load(fh))
+    xml = SALIDA / "xml"
+    shutil.rmtree(SALIDA, ignore_errors=True)
+    xml.mkdir(parents=True)
+    fachadas_ytd(xml)
+    arquetipos, entidades = [], []
+    todas_alturas, n_tris = [], 0
+    for e0 in range(e0h, e0h + 1000, CASILLA):
+        for n0 in range(n1h - 1000, n1h, CASILLA):
+            nombre = f"{e0 // 10}_{n0 // 10}"
+            # Las colisiones del mapa se cargan solas y van en coordenadas del mundo
+            gx, gy = config_v.utm_a_juego(e0 + CASILLA / 2, n0 + CASILLA / 2)
+            mundo = np.array([gx, gy, 0.0])
+            orto = f"bcn_o_{nombre}"
+            rage.escribir_ytd(xml / f"{orto}.ytd.xml", {orto: (mosaico(e0, n0, CASILLA, PX_SUELO), False)})
+            v, n, uv, tris = terreno(capas, e0h, n1h, e0, n0)
+            rage.escribir_ydr(xml / f"bcn_t_{nombre}.ydr.xml", f"bcn_t_{nombre}",
+                              [dict(textura=orto, color=np.full((len(t["v"]), 4), 255), **t)
+                               for t in partir(dict(v=v, n=n, uv=uv, i=tris))], DIST_TERRENO)
+            rage.escribir_ybn(xml / f"bcn_t_{nombre}.ybn.xml", v + mundo, tris, [rage.MAT_PAVEMENT],
+                              np.zeros(len(tris), int))
+            arquetipos.append((f"bcn_t_{nombre}", orto, DIST_TERRENO))
+            # Partes de la casilla y, para las medianeras, las de 40 m alrededor
+            m = 40
+            en_casilla = (centros[:, 0] >= e0) & (centros[:, 0] < e0 + CASILLA) & \
+                         (centros[:, 1] >= n0) & (centros[:, 1] < n0 + CASILLA)
+            cerca = (centros[:, 0] >= e0 - m) & (centros[:, 0] < e0 + CASILLA + m) & \
+                    (centros[:, 1] >= n0 - m) & (centros[:, 1] < n0 + CASILLA + m)
+            vecinos = edificios_v.volumenes([partes[i] for i in np.flatnonzero(cerca)], capas, e0h, n1h)
+            propios = [vv for vv in vecinos if en_casilla[0] is not None and
+                       e0 <= vv["p"]["anillos"][0][:, 0].mean() < e0 + CASILLA and
+                       n0 <= vv["p"]["anillos"][0][:, 1].mean() < n0 + CASILLA]
+            todas_alturas += [vv["techo"] - vv["suelo"] for vv in propios]
+            tejados, fachadas = edificios_v.construir(propios, vecinos, info, colores, calles, (e0, n0), CASILLA)
+            if tejados is not None:
+                rage.escribir_ydr(xml / f"bcn_r_{nombre}.ydr.xml", f"bcn_r_{nombre}",
+                                  [dict(textura=orto, color=np.full((len(t["v"]), 4), 255), **t)
+                                   for t in partir(tejados)], DIST_EDIFICIOS)
+                arquetipos.append((f"bcn_r_{nombre}", orto, DIST_EDIFICIOS))
+                cv, ct = colision_edificios(propios, (e0, n0), CASILLA, mundo)
+                rage.escribir_ybn(xml / f"bcn_e_{nombre}.ybn.xml", cv, ct, [rage.MAT_PLASTER], np.zeros(len(ct), int))
+            lista = []
+            for tex, geo in fachadas.items():
+                for trozo in partir(geo):
+                    n_tris += len(trozo["i"])
+                    lista.append(dict(textura="fa_piezas" if tex.startswith("fa_piezas") else tex,
+                                      recorte=tex == "fa_piezas_alfa", **trozo))
+            if lista:
+                rage.escribir_ydr(xml / f"bcn_e_{nombre}.ydr.xml", f"bcn_e_{nombre}", lista, DIST_EDIFICIOS)
+                arquetipos.append((f"bcn_e_{nombre}", "bcn_fachadas", DIST_EDIFICIOS))
+            for modelo, ytd, dist in arquetipos[-3:]:
+                if modelo.endswith(nombre) and all(e[0] != modelo for e in entidades):
+                    entidades.append((modelo, (gx, gy, 0.0), dist))
+            print(f"Casilla {nombre}: {len(propios)} volúmenes, {sum(len(x['i']) for x in lista)} triángulos de fachada",
+                  flush=True)
+    with open(SALIDA / "colocacion.pkl", "wb") as fh:
+        pickle.dump(dict(arquetipos=arquetipos, entidades=entidades), fh)
+    print(f"Alturas: mediana {np.median(todas_alturas):.1f} m, máx {max(todas_alturas):.1f} m; "
+          f"{n_tris} triángulos de fachada en la hoja")

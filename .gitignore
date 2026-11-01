@@ -1,0 +1,29 @@
+# Solo código y textos: los datos, descargas y modelos generados pesan cientos de GB y se regeneran.
+# Las versiones de los paquetes del juego (dlc.rpf) se guardan aparte en mod_v/versiones/.
+/datos/
+/datos_v/
+/descargas/
+/mod/
+/mod_v/
+/blender/
+/copia_juego/
+/docs/
+# nunca: credenciales
+*token*.txt
+# compilados y cachés
+__pycache__/
+*.pyc
+herramientas_v/cwtool/bin/
+herramientas_v/cwtool/obj/
+*.asi
+*.lib
+*.pdb
+*.dll
+*.exe
+*.dds
+*.npz
+*.pkl
+*.log
+herramientas_v/prueba/bin/
+herramientas_v/prueba/r/
+herramientas_v/prueba/xml/

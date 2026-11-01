@@ -1,0 +1,93 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<BoundsFile>
+  <Bounds type="Composite">
+    <BoxMin x="-2.04" y="-2.04" z="-2.04" />
+    <BoxMax x="2.04" y="2.04" z="2.04" />
+    <BoxCenter x="0.0" y="0.0" z="0.0" />
+    <SphereCenter x="0.0" y="0.0" z="0.0" />
+    <SphereRadius value="3.5333836" />
+    <Margin value="0" />
+    <Volume value="1" />
+    <Inertia x="1.0" y="1.0" z="1.0" />
+    <MaterialIndex value="0" />
+    <MaterialColourIndex value="0" />
+    <ProceduralID value="0" />
+    <RoomID value="0" />
+    <PedDensity value="0" />
+    <UnkFlags value="0" />
+    <PolyFlags value="0" />
+    <UnkType value="1" />
+    <Children>
+      <Item type="GeometryBVH">
+        <BoxMin x="-2.04" y="-2.04" z="-2.04" />
+        <BoxMax x="2.04" y="2.04" z="2.04" />
+        <BoxCenter x="0.0" y="0.0" z="0.0" />
+        <SphereCenter x="0.0" y="0.0" z="0.0" />
+        <SphereRadius value="3.4641016" />
+        <Margin value="0.04" />
+        <Volume value="1" />
+        <Inertia x="1.0" y="1.0" z="1.0" />
+        <MaterialIndex value="0" />
+        <MaterialColourIndex value="0" />
+        <ProceduralID value="0" />
+        <RoomID value="0" />
+        <PedDensity value="0" />
+        <UnkFlags value="0" />
+        <PolyFlags value="0" />
+        <UnkType value="1" />
+        <CompositeTransform>
+          1.0 0.0 0.0 0.0
+          0.0 1.0 0.0 0.0
+          0.0 0.0 1.0 0.0
+          0.0 0.0 0.0 1.0
+        </CompositeTransform>
+        <GeometryCenter x="0.0" y="0.0" z="0.0" />
+        <Materials>
+          <Item>
+            <Type value="28" />
+            <ProceduralID value="0" />
+            <RoomID value="0" />
+            <PedDensity value="0" />
+            <Flags>NONE</Flags>
+            <MaterialColourIndex value="0" />
+            <Unk value="0" />
+          </Item>
+        </Materials>
+        <Vertices>
+          -2.0, -2.0, -2.0
+          -2.0, -2.0, 2.0
+          -2.0, 2.0, -2.0
+          -2.0, 2.0, 2.0
+          2.0, -2.0, -2.0
+          2.0, -2.0, 2.0
+          2.0, 2.0, -2.0
+          2.0, 2.0, 2.0
+        </Vertices>
+        <VertexColours>
+          255, 255, 255, 255
+          255, 255, 255, 255
+          255, 255, 255, 255
+          255, 255, 255, 255
+          255, 255, 255, 255
+          255, 255, 255, 255
+          255, 255, 255, 255
+          255, 255, 255, 255
+        </VertexColours>
+        <Polygons>
+          <Triangle m="0" v1="0" v2="1" v3="3" f1="0" f2="0" f3="0" />
+          <Triangle m="0" v1="0" v2="3" v3="2" f1="0" f2="0" f3="0" />
+          <Triangle m="0" v1="2" v2="3" v3="7" f1="0" f2="0" f3="0" />
+          <Triangle m="0" v1="2" v2="7" v3="6" f1="0" f2="0" f3="0" />
+          <Triangle m="0" v1="6" v2="7" v3="5" f1="0" f2="0" f3="0" />
+          <Triangle m="0" v1="6" v2="5" v3="4" f1="0" f2="0" f3="0" />
+          <Triangle m="0" v1="4" v2="5" v3="1" f1="0" f2="0" f3="0" />
+          <Triangle m="0" v1="4" v2="1" v3="0" f1="0" f2="0" f3="0" />
+          <Triangle m="0" v1="2" v2="6" v3="4" f1="0" f2="0" f3="0" />
+          <Triangle m="0" v1="2" v2="4" v3="0" f1="0" f2="0" f3="0" />
+          <Triangle m="0" v1="7" v2="3" v3="1" f1="0" f2="0" f3="0" />
+          <Triangle m="0" v1="7" v2="1" v3="5" f1="0" f2="0" f3="0" />
+        </Polygons>
+      </Item>
+    </Children>
+  </Bounds>
+</BoundsFile>
