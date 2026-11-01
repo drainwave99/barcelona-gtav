@@ -236,6 +236,9 @@ def main():
     global PACK, OBRA
     hojas = sorted(sys.argv[1:])
     trozos = [hojas[i:i + HOJAS_POR_PACK] for i in range(0, len(hojas), HOJAS_POR_PACK)]
+    if not _juego_abierto():  # lo instalado ahora, para poder volver si lo nuevo falla
+        import versiones_v
+        versiones_v.guardar("antes")
     for k, trozo in enumerate(trozos):
         PACK = "bcn" if k == 0 else f"bcn{k + 1}"
         OBRA = config_v.MOD / ("dlc" if k == 0 else f"dlc_{PACK}")
