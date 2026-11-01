@@ -440,8 +440,9 @@ def _tapas(vias, calzada, casilla):
     return centros, ejes
 
 
-def construir(osm, edificios, z, e0, n0, lado, paso):
-    """edificios: lista de Polygon (UTM) del Catastro alrededor de la casilla."""
+def construir(osm, edificios, z, e0, n0, lado, paso, cubierto=None):
+    """edificios: lista de Polygon (UTM) del Catastro alrededor de la casilla. cubierto: si es una lista, se le
+    añade lo que tapan calzada, aceras y aparcamientos (para hundir ahí el terreno que se ve)."""
     marco = 30.0
     caja = (e0 - marco, n0 - marco, e0 + lado + marco, n0 + lado + marco)
     casilla = box(e0, n0, e0 + lado, n0 + lado)
@@ -473,6 +474,8 @@ def construir(osm, edificios, z, e0, n0, lado, paso):
     if len(suelo.empinado):  # muros y taludes: sin calle pegada encima (salían pirámides de acera)
         empinado = shapely.union_all(suelo.empinado).buffer(0.2)
         calzada, aparc, acera, pintura = (g.difference(empinado) for g in (calzada, aparc, acera, pintura))
+    if cubierto is not None:
+        cubierto.append(shapely.union_all([calzada, aparc, acera]).intersection(casilla.buffer(paso)))
     out = {}
     capas = (("vi_asfalto", calzada, (0.80, 0.16, 0.06)), ("vi_aparcamiento", aparc, (0.86, 0.10, 0.05)),
              ("vi_acera", acera, (0.88, 0.10, 0.04)), ("vi_linea", pintura, (0.88, 0.08, 0.06)))

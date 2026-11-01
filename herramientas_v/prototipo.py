@@ -35,6 +35,7 @@ PASO = 2.0  # malla del terreno
 PX_SUELO = 2048
 PX_FACHADA = 512
 DIST_TERRENO, DIST_EDIFICIOS = 1500.0, 800.0
+HUNDIR = 0.20  # m que baja el terreno visible bajo calles y aceras (la colisión se queda)
 # LOD de la casilla (bcn_l_): terreno de 10 m, edificios como prismas y la ortofoto en pequeño.
 # Por debajo de DIST_HIJOS se ve el detalle (terreno, tejados, fachadas, puentes), más lejos el LOD.
 PASO_LOD, PX_LOD, DIST_LOD, DIST_HIJOS = 10.0, 512, 8000.0, 800.0
@@ -405,14 +406,7 @@ def main():
             if cerca_t:
                 tris = tris[tuneles_v.fuera(v + [e0 + CASILLA / 2, n0 + CASILLA / 2, 0], tris, cerca_t)]
             tris = tris[fuera_del_mar(v + [e0 + CASILLA / 2, n0 + CASILLA / 2, 0], tris)]
-            llano, muro = separar_muros(v, n, tris)
-            geos_t = [dict(textura=orto, color=np.full((len(t["v"]), 4), 255), **t)
-                      for t in partir(dict(v=v, n=n, uv=uv, i=llano))] +                      ([dict(textura="bcn_muro", **t) for t in partir(muro)] if muro else [])
-            if geos_t:  # una casilla toda de mar no lleva terreno: se ve el agua del juego
-                rage.escribir_ydr(xml / f"bcn_t_{nombre}.ydr.xml", f"bcn_t_{nombre}", geos_t, DIST_TERRENO)
-                rage.escribir_ybn(xml / f"bcn_t_{nombre}.ybn.xml", v + mundo, tris, [rage.MAT_PAVEMENT],
-                                  np.zeros(len(tris), int))
-                arquetipos.append((f"bcn_t_{nombre}", orto, DIST_TERRENO))
+            cubierto = []  # lo que tapan calles y aceras: ahí el terreno que se ve baja (el terreno se escribe después)
             # Partes de la casilla y, para las medianeras, las de 40 m alrededor
             m = 40
             en_casilla = (centros[:, 0] >= e0) & (centros[:, 0] < e0 + CASILLA) & \
@@ -428,7 +422,7 @@ def main():
             if osm_hoja is not None:  # calzada, aceras, aparcamientos y marcas viales sobre el terreno
                 k = int(CASILLA / PASO) + 1
                 suelo_calles = calles_v.construir(osm_hoja, [vv["poli"] for vv in vecinos], v[:, 2].reshape(k, k),
-                                                  e0, n0, CASILLA, PASO)
+                                                  e0, n0, CASILLA, PASO, cubierto)
                 if suelo_calles:
                     rage.escribir_ydr(xml / f"bcn_c_{nombre}.ydr.xml", f"bcn_c_{nombre}",
                                       [dict(textura=t, recorte=t.endswith("_alfa"), **trozo) for t, g in suelo_calles.items() for trozo in partir(g)],
@@ -445,6 +439,22 @@ def main():
                     rage.escribir_ybn(xml / f"bcn_a_{nombre}.ybn.xml", col_a[0] + mundo, col_a[1], [rage.MAT_CONCRETE],
                                       np.zeros(len(col_a[1]), int))
                     arquetipos.append((f"bcn_a_{nombre}", "bcn_obra", DIST_EDIFICIOS))
+            # El terreno que se ve baja HUNDIR m bajo calles y aceras: a 4 cm por debajo del asfalto, en las cuestas
+            # el juego no sabía cuál va delante y el terreno asomaba a dientes de sierra. La colisión no cambia.
+            v_ver = v
+            if cubierto and not cubierto[0].is_empty:
+                dentro = shapely.contains_xy(cubierto[0], v[:, 0] + e0 + CASILLA / 2, v[:, 1] + n0 + CASILLA / 2)
+                v_ver = v.copy()
+                v_ver[dentro, 2] -= HUNDIR
+            llano, muro = separar_muros(v_ver, n, tris)
+            geos_t = [dict(textura=orto, color=np.full((len(t["v"]), 4), 255), **t)
+                      for t in partir(dict(v=v_ver, n=n, uv=uv, i=llano))] + \
+                     ([dict(textura="bcn_muro", **t) for t in partir(muro)] if muro else [])
+            if geos_t:  # una casilla toda de mar no lleva terreno: se ve el agua del juego
+                rage.escribir_ydr(xml / f"bcn_t_{nombre}.ydr.xml", f"bcn_t_{nombre}", geos_t, DIST_TERRENO)
+                rage.escribir_ybn(xml / f"bcn_t_{nombre}.ybn.xml", v + mundo, tris, [rage.MAT_PAVEMENT],
+                                  np.zeros(len(tris), int))
+                arquetipos.append((f"bcn_t_{nombre}", orto, DIST_TERRENO))
             modelo_lod = f"bcn_l_{nombre}"
             rage.escribir_ytd(xml / f"{modelo_lod}.ytd.xml", {modelo_lod: (mosaico(e0, n0, CASILLA, PX_LOD), False)})
             rage.escribir_ydr(xml / f"{modelo_lod}.ydr.xml", modelo_lod,
