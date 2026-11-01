@@ -23,6 +23,7 @@ static class Programa
     {
         if (args.Length == 4 && args[0] == "dlclist") return DlcList(args[1], args[2], args[3]);
         if (args.Length >= 4 && args[0] == "abrir") return Abrir(args[1], args[2], args[3], args.Length > 4 ? args[4] : null);
+        if (args.Length == 4 && args[0] == "meter") return Meter(args[1], args[2], args[3]);
         if (args.Length == 2 && args[0] == "info") return Info(args[1]);
         if (args.Length == 3 && args[0] == "listar") return Listar(args[1], args[2]);
         if (args.Length == 4 && args[0] == "sacar") return Sacar(args[1], args[2], args[3]);
@@ -298,6 +299,43 @@ static class Programa
         RpfFile.CreateFile(entrada.Parent, entrada.Name, System.Text.Encoding.UTF8.GetBytes(texto), true);
         Console.WriteLine("añadido " + linea + " en " + destino);
         return 0;
+    }
+
+    // Mete una carpeta (subcarpetas .rpf = RPF anidados) en un RPF ya existente, mezclando con lo que hay: las
+    // carpetas que ya existen se reaprovechan, los RPF anidados y archivos con el mismo nombre se sustituyen
+    static int Meter(string gta, string archivo, string carpeta)
+    {
+        GTA5Keys.LoadFromPath(gta, false, null);
+        var rpf = new RpfFile(Path.GetFullPath(archivo), Path.GetFileName(archivo));
+        rpf.ScanStructure(null, e => Console.Error.WriteLine(e));
+        RpfFile.EnsureValidEncryption(rpf, null);
+        int n = Mezclar(rpf.Root, carpeta);
+        Console.WriteLine($"metidos {n} archivos en {archivo}");
+        return 0;
+    }
+
+    static int Mezclar(RpfDirectoryEntry dir, string carpeta)
+    {
+        int n = 0;
+        foreach (var sub in Directory.GetDirectories(carpeta))
+        {
+            var nombre = Path.GetFileName(sub);
+            if (nombre.EndsWith(".rpf", StringComparison.OrdinalIgnoreCase))
+            {
+                var viejo = dir.Files.FirstOrDefault(f => f.Name.Equals(nombre, StringComparison.OrdinalIgnoreCase));
+                if (viejo != null) RpfFile.DeleteEntry(viejo);
+                n += Llenar(RpfFile.CreateNew(dir, nombre).Root, sub);
+                continue;
+            }
+            var hay = dir.Directories.FirstOrDefault(d => d.Name.Equals(nombre, StringComparison.OrdinalIgnoreCase));
+            n += Mezclar(hay ?? RpfFile.CreateDirectory(dir, nombre), sub);
+        }
+        foreach (var f in Directory.GetFiles(carpeta))
+        {
+            RpfFile.CreateFile(dir, Path.GetFileName(f), File.ReadAllBytes(f), true);
+            n++;
+        }
+        return n;
     }
 
     static int Rpf(string carpeta, string archivo)
