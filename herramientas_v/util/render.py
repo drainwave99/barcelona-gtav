@@ -109,6 +109,7 @@ for ruta, centro, xml in modelos():
         tx = (np.mod(u[:, 0], 1) * 63).astype(int)
         ty = (np.mod(u[:, 1], 1) * 63).astype(int)
         col = img[ty, tx] * (0.55 + 0.45 * np.clip(np.abs(n @ luz), 0, 1))[:, None]
+        col = col * d[:, 6:9][idx2].mean(1) / 255  # color de vértice (tinte)
         if tex.startswith("vi_linea"):
             col = np.full_like(col, 235)
         relp = p - cam

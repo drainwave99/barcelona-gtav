@@ -17,7 +17,7 @@ import sys
 
 import numpy as np
 import shapely
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageDraw, ImageFilter, ImageOps
 from shapely.geometry import Polygon, box
 from shapely.geometry.polygon import orient
 
@@ -101,7 +101,8 @@ def textura_muro():
     """Muro de contención de hormigón (2,5 m por repetición), con juntas de encofrado y manchas de agua."""
     if not _MURO:
         r = np.random.default_rng(5)
-        a = np.full((512, 512, 3), (150, 148, 142), np.float32)
+        # claro y casi gris: se tiñe con el color de la ortofoto de alrededor (separar_muros)
+        a = np.full((512, 512, 3), (222, 221, 218), np.float32)
         a += r.normal(0, 7, (512, 512))[..., None]
         manchas = np.asarray(Image.fromarray(r.normal(0, 1, (16, 16)).astype(np.float32)).resize((512, 512), Image.BICUBIC))
         a += 10 * manchas[..., None]
@@ -113,12 +114,23 @@ def textura_muro():
     return _MURO[0]
 
 
-def separar_muros(v, n, tris, rango=1.8):
+def separar_muros(v, n, tris, rango=1.8, orto=None):
     """Triángulos del terreno casi verticales (suben más de 'rango' m en 2 m: muros de contención,
     taludes de la C-31): la ortofoto se estiraba en ellos. Se devuelven aparte, con UV vertical para la
-    textura de muro. -> (índices llanos, geometría de muro o None)."""
-    z = v[tris][:, :, 2]
-    empinado = np.ptp(z, axis=1) > rango
+    textura de muro. -> (índices llanos, geometría de muro o None).
+    Se decide por cuadro de la malla (los dos triángulos juntos) y el resultado se alisa: triángulo a
+    triángulo el borde del talud salía a dientes de sierra. Con 'orto' (la ortofoto de la casilla) el muro
+    se tiñe del color del sitio, para que no salte de la tierra al gris."""
+    k = int(round(np.sqrt(len(v))))
+    if k * k != len(v) or not len(tris):
+        return tris, None
+    from scipy import ndimage
+    z = v[:, 2].reshape(k, k)
+    esq = np.stack([z[:-1, :-1], z[:-1, 1:], z[1:, :-1], z[1:, 1:]])
+    cuadro = esq.max(0) - esq.min(0) > rango
+    cuadro = ndimage.binary_opening(ndimage.binary_closing(cuadro, iterations=1), iterations=1) |         (esq.max(0) - esq.min(0) > 2.5 * rango)  # lo muy vertical siempre es muro
+    fila, col = tris.min(1) // k, (tris % k).min(1)
+    empinado = cuadro[np.minimum(fila, k - 2), np.minimum(col, k - 2)]
     if not empinado.any():
         return tris, None
     t = tris[empinado]
@@ -128,8 +140,16 @@ def separar_muros(v, n, tris, rango=1.8):
     # u a lo largo del muro (perpendicular a su normal horizontal), v en altura
     dx, dy = -nn[:, 1] / horiz, nn[:, 0] / horiz
     uv = np.c_[(p[:, 0] * dx + p[:, 1] * dy) / 2.5, p[:, 2] / 2.5]
-    gris = np.full(len(p), 235)
-    muro = dict(v=p, n=nn, uv=uv, color=np.c_[gris, gris, gris, np.full(len(p), 255)],
+    if orto is not None:
+        lado = CASILLA / 2
+        peq = np.asarray(orto.convert("RGB").resize((125, 125), Image.BOX).filter(ImageFilter.GaussianBlur(1.5)),
+                         np.float32)
+        cx = np.clip(((p[:, 0] + lado) / CASILLA * 125).astype(int), 0, 124)
+        cy = np.clip(((lado - p[:, 1]) / CASILLA * 125).astype(int), 0, 124)
+        rgb = np.clip(peq[cy, cx] * (255 / 222) * 0.92, 0, 255).astype(int)  # la pared, algo más oscura
+    else:
+        rgb = np.full((len(p), 3), 235)
+    muro = dict(v=p, n=nn, uv=uv, color=np.c_[rgb, np.full(len(p), 255)],
                 i=np.arange(len(p)).reshape(-1, 3))
     return tris[~empinado], muro
 
@@ -494,8 +514,9 @@ def main():
             gx, gy = config_v.utm_a_juego(e0 + CASILLA / 2, n0 + CASILLA / 2)
             mundo = np.array([gx, gy, 0.0])
             orto = f"bcn_o_{nombre}"
+            img_orto = bajo_puentes(mosaico(e0, n0, CASILLA, PX_SUELO), capas, e0h, n1h, e0, n0)
             rage.escribir_ytd(xml / f"{orto}.ytd.xml",
-                              {orto: (bajo_puentes(mosaico(e0, n0, CASILLA, PX_SUELO), capas, e0h, n1h, e0, n0), False),
+                              {orto: (img_orto, False),
                                "bcn_muro": (textura_muro(), False)})
             v, n, uv, tris = terreno(capas, e0h, n1h, e0, n0)
             # túneles: fuera el terreno que se mete en el tubo (la pared de la boca)
@@ -544,7 +565,7 @@ def main():
                 dentro = shapely.contains_xy(cubierto[0], v[:, 0] + e0 + CASILLA / 2, v[:, 1] + n0 + CASILLA / 2)
                 v_ver = v.copy()
                 v_ver[dentro, 2] -= HUNDIR
-            llano, muro = separar_muros(v_ver, n, tris)
+            llano, muro = separar_muros(v_ver, n, tris, orto=img_orto)
             geos_t = [dict(textura=orto, color=np.full((len(t["v"]), 4), 255), **t)
                       for t in partir(dict(v=v_ver, n=n, uv=uv, i=llano))] + \
                      ([dict(textura="bcn_muro", **t) for t in partir(muro)] if muro else [])
