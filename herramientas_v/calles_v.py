@@ -329,6 +329,10 @@ def _malla(tris, suelo, sube, escala, centro, tono):
 
 def _bordillos(calzada, acera, suelo, centro):
     """Caras verticales del bordillo donde la acera toca la calzada (mirando a la calzada)."""
+    # solo la parte de polígonos: una colección con líneas o puntos sueltos no tiene contorno
+    calzada = shapely.union_all([g for g in shapely.get_parts(calzada) if g.geom_type in ("Polygon", "MultiPolygon")])
+    if calzada.is_empty:
+        return None
     borde = calzada.boundary.intersection(acera.buffer(0.2))
     lineas = [g for g in shapely.get_parts(shapely.segmentize(borde, 2.0)) if g.geom_type == "LineString"]
     v, uv = [], []
