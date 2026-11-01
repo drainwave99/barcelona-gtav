@@ -254,6 +254,8 @@ def vias_puente(osm, caja=None):
             continue
         if t.get("name") == "Pont del Petroli":
             continue  # lo hace monumentos_v
+        if t.get("highway") == "footway" and np.hypot(*(np.asarray(v["xy"], float).mean(0) - (436790.4, 4587840.9))) < 5:
+            continue  # la pasarela roja sobre las vías junto al Petroli: monumentos_v
         s = seccion(t)
         if s is None:
             continue

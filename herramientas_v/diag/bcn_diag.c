@@ -214,12 +214,35 @@ static void ir_a_pruebas(void)
     for (int i = 0; i < 100 && !ytd_cargado("bcn_obra"); i++) sh_wait(30);
     snprintf(t, sizeof t, "Texturas bcn_obra cargadas=%d. Haz una captura (F12) en cada vista", ytd_cargado("bcn_obra"));
     avisar(t);
-    for (int k = 0; k < N_VISTAS; k++) {
-        foco(VISTAS[k].x, VISTAS[k].y, 0.0f);
-        mover(ped, VISTAS[k].x, VISTAS[k].y, VISTAS[k].z + 40.0f);  /* el jugador cerca: carga lo de alrededor */
-        int c = camara(VISTAS[k].x, VISTAS[k].y, VISTAS[k].z, VISTAS[k].cabeceo, VISTAS[k].rumbo);  /* rumbo 0 = norte, + = oeste */
+    /* bcn_vistas.txt (si está): una vista por línea "x y z cabeceo rumbo nombre", en lugar de las de VISTAS */
+    static struct { char nombre[96]; float x, y, z, cabeceo, rumbo; } lista[200];
+    int n = 0;
+    FILE *fv = fopen("bcn_vistas.txt", "r");
+    if (fv) {
+        char linea[256];
+        while (n < 200 && fgets(linea, sizeof linea, fv)) {
+            int usados = 0;
+            if (sscanf(linea, "%f %f %f %f %f %n", &lista[n].x, &lista[n].y, &lista[n].z, &lista[n].cabeceo,
+                       &lista[n].rumbo, &usados) >= 5) {
+                snprintf(lista[n].nombre, sizeof lista[n].nombre, "%s", linea + usados);
+                lista[n].nombre[strcspn(lista[n].nombre, "\r\n")] = 0;
+                n++;
+            }
+        }
+        fclose(fv);
+    } else {
+        for (; n < N_VISTAS; n++) {
+            snprintf(lista[n].nombre, sizeof lista[n].nombre, "%s", VISTAS[n].nombre);
+            lista[n].x = VISTAS[n].x; lista[n].y = VISTAS[n].y; lista[n].z = VISTAS[n].z;
+            lista[n].cabeceo = VISTAS[n].cabeceo; lista[n].rumbo = VISTAS[n].rumbo;
+        }
+    }
+    for (int k = 0; k < n; k++) {
+        foco(lista[k].x, lista[k].y, 0.0f);
+        mover(ped, lista[k].x, lista[k].y, lista[k].z + 40.0f);  /* el jugador cerca: carga lo de alrededor */
+        int c = camara(lista[k].x, lista[k].y, lista[k].z, lista[k].cabeceo, lista[k].rumbo);  /* rumbo 0 = norte, + = oeste */
         ver_camaras(1);
-        snprintf(t, sizeof t, "Vista %s: deberia estar en el centro", VISTAS[k].nombre);
+        snprintf(t, sizeof t, "Vista %s: deberia estar en el centro", lista[k].nombre);
         avisar(t);
         sh_wait(9000);  /* las hojas tardan en cargar */
         if (automatico) { captura(); avisar("captura"); }
@@ -246,9 +269,11 @@ static void principal(void)
     if (f) {
         fclose(f);
         automatico = 1;
-        comprobar_modelos();
+        FILE *fv = fopen("bcn_vistas.txt", "r");  /* con vistas propias, solo las vistas */
+        if (fv) fclose(fv);
+        if (!fv) comprobar_modelos();
         ir_a_pruebas();
-        probar_colision();
+        if (!fv) probar_colision();
         avisar("AUTO FIN");
         sh_wait(3000);
         if (registro) fclose(registro);

@@ -148,6 +148,101 @@ def mascara_edificios(partes, centros, e0h, n1h, m):
     return np.asarray(img, bool)
 
 
+HOYO_AREA, HOYO_HONDO = 3000.0, 8.0  # m², m: hoyos cerrados que se rellenan (rampas de parking, patios bajos)
+
+
+def mascara_vias(osm, e0h, n1h, m):
+    """En la rejilla de 0,5 m: (calles de verdad y vías de tren, servicio). Los hoyos que tocan las primeras
+    (trincheras, bocas de túnel, pasos inferiores) no se rellenan; los que tocan las segundas (caminos de
+    servicio, parkings de OSM: rampas) se pavimentan como parking."""
+    img, img_s = Image.new("1", (m, m), 0), Image.new("1", (m, m), 0)
+    dib, dib_s = ImageDraw.Draw(img), ImageDraw.Draw(img_s)
+    a_px = lambda xy: [((x - e0h) / 0.5, (n1h - y) / 0.5) for x, y in xy]
+    for v in osm["vias"]:
+        t = v["tags"]
+        hw = t.get("highway")
+        q = a_px(v["xy"])
+        if len(q) < 2:
+            continue
+        if t.get("railway") in ("rail", "light_rail", "tram", "subway", "narrow_gauge") or \
+                (hw in calles_v.CARRILES and hw != "service"):
+            dib.line(q, fill=1, width=12)
+        elif hw == "service":
+            dib_s.line(q, fill=1, width=10)
+    for a in osm["areas"]:
+        if a["tags"].get("amenity") == "parking" and len(a["xy"]) > 2:
+            dib_s.polygon(a_px(a["xy"]), fill=1)
+    return np.asarray(img, bool), np.asarray(img_s, bool)
+
+
+def rellenar_hoyos(s, vias, servicio):
+    """Hoyos cerrados y pequeños del suelo (rejilla de 0,5 m; se calcula a 2 m): en las rampas de los parkings
+    subterráneos y en patios hundidos el LiDAR mide el fondo y la ortofoto se estiraba hacia abajo. Se llenan
+    hasta el borde por donde se vaciarían (llano) -> (suelo, máscara de lo rellenado)."""
+    import heapq
+    from scipy import ndimage
+    k = 4
+    m = s.shape[0] // k * k
+    bloque = s[:m, :m].reshape(m // k, k, m // k, k)
+    with np.errstate(all="ignore"):
+        c = np.nanmean(bloque, axis=(1, 3))
+    alto, ancho = c.shape
+    lleno = np.where(np.isnan(c), -np.inf, c)
+    hecho = np.zeros(c.shape, bool)
+    cola = []
+    for f in range(alto):  # inundación por prioridad desde el borde y desde los huecos (mar, sin datos)
+        for col in range(ancho):
+            if f in (0, alto - 1) or col in (0, ancho - 1) or np.isnan(c[f, col]):
+                hecho[f, col] = True
+                heapq.heappush(cola, (lleno[f, col], f, col))
+    while cola:
+        z, f, col = heapq.heappop(cola)
+        for df, dc in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            g, h = f + df, col + dc
+            if 0 <= g < alto and 0 <= h < ancho and not hecho[g, h]:
+                hecho[g, h] = True
+                lleno[g, h] = max(lleno[g, h], z)
+                heapq.heappush(cola, (lleno[g, h], g, h))
+    sube = np.where(np.isfinite(lleno) & np.isfinite(c), lleno - c, 0.0)
+    trozos, n = ndimage.label(sube > 0.25)
+    if not n:
+        return s, np.zeros(s.shape, bool)
+    vias_c = vias[:m, :m].reshape(m // k, k, m // k, k).any(axis=(1, 3))
+    idx = np.arange(1, n + 1)
+    area = ndimage.sum(np.ones_like(sube), trozos, idx) * (0.5 * k) ** 2
+    hondo = ndimage.maximum(sube, trozos, idx)
+    toca = ndimage.maximum(vias_c, trozos, idx)
+    vale = np.r_[False, (area <= HOYO_AREA) & (hondo <= HOYO_HONDO) & ~toca.astype(bool)]
+    malla = ndimage.binary_dilation(vale[trozos], iterations=1)  # el borde del hoyo también, para que no quede escalón
+    nivel = np.kron(np.where(malla, lleno, -np.inf), np.ones((k, k)))
+    out = s.copy()
+    out[:m, :m] = np.where(np.isfinite(nivel), np.fmax(s[:m, :m], nivel), s[:m, :m])
+    # se pavimentan como parking los que tocan un camino de servicio o un parking de OSM (rampas); los patios
+    # de manzana y las obras solo se rellenan
+    serv_c = servicio[:m, :m].reshape(m // k, k, m // k, k).any(axis=(1, 3))
+    cerca = ndimage.maximum(serv_c, trozos, idx).astype(bool)
+    mascara = np.zeros(s.shape, bool)
+    mascara[:m, :m] = np.kron((vale & np.r_[False, cerca])[trozos], np.ones((k, k), bool))
+    return out, mascara
+
+
+def hoyos_casilla(capas, e0h, n1h, e0, n0):
+    """Lo rellenado por rellenar_hoyos dentro de la casilla, como polígono UTM (celdas de 2 m): será parking."""
+    rel = capas.get("relleno")
+    if rel is None:
+        return None
+    c0, f0, lado = int((e0 - e0h) / 0.5), int((n1h - n0 - CASILLA) / 0.5), int(CASILLA / 0.5)
+    trozo = rel[f0:f0 + lado, c0:c0 + lado]
+    if not trozo.any():
+        return None
+    k = 4
+    m = trozo.shape[0] // k * k
+    celdas = trozo[:m, :m].reshape(m // k, k, m // k, k).mean(axis=(1, 3)) > 0.5
+    f, c = np.nonzero(celdas)
+    x0, y1 = e0 + c * 2.0, n0 + CASILLA - f * 2.0
+    return shapely.union_all(shapely.box(x0, y1 - 2.0, x0 + 2.0, y1)).simplify(0.3)
+
+
 def terreno(capas, e0h, n1h, e0, n0):
     k = int(CASILLA / PASO) + 1
     xs = np.linspace(0, CASILLA, k)
@@ -155,6 +250,8 @@ def terreno(capas, e0h, n1h, e0, n0):
     if "suelo_2m" not in capas:  # media de 2,5 m: un píxel suelto de 0,5 m cada 2 m daba dientes de sierra en taludes
         from scipy import ndimage
         s = capas["suelo"].astype(np.float32)
+        if "mascara_vias" in capas:  # antes de bajar el suelo de los edificios (si no, lo volvería a subir)
+            s, capas["relleno"] = rellenar_hoyos(s, *capas["mascara_vias"])
         if "mascara_edif" in capas:
             # dentro de los edificios del Catastro, el suelo más bajo de 2 m alrededor: una plaza sobre un
             # podio o el suelo interpolado bajo el edificio sacaban dientes de sierra delante de la fachada
@@ -367,6 +464,7 @@ def main():
             osm = pickle.load(fh)
         calles = edificios_v.arbol_calles(osm)
         osm_hoja = calles_v.recortar(osm, (e0h - 300, n1h - 1300, e0h + 1300, n1h + 300))
+        capas["mascara_vias"] = mascara_vias(osm_hoja, e0h, n1h, capas["suelo"].shape[0])
         # recintos de obra vista según OSM (p. ej. la fábrica de Anís del Mono): sus edificios, de ladrillo
         ladrillo = [Polygon(a["xy"]).buffer(0) for a in osm_hoja["areas"]
                     if a["tags"].get("wall") == "brick_wall" or a["tags"].get("building:material") == "brick"]
@@ -422,7 +520,7 @@ def main():
             if osm_hoja is not None:  # calzada, aceras, aparcamientos y marcas viales sobre el terreno
                 k = int(CASILLA / PASO) + 1
                 suelo_calles = calles_v.construir(osm_hoja, [vv["poli"] for vv in vecinos], v[:, 2].reshape(k, k),
-                                                  e0, n0, CASILLA, PASO, cubierto)
+                                                  e0, n0, CASILLA, PASO, cubierto, hoyos_casilla(capas, e0h, n1h, e0, n0))
                 if suelo_calles:
                     rage.escribir_ydr(xml / f"bcn_c_{nombre}.ydr.xml", f"bcn_c_{nombre}",
                                       [dict(textura=t, recorte=t.endswith("_alfa"), **trozo) for t, g in suelo_calles.items() for trozo in partir(g)],

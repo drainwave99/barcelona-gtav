@@ -277,7 +277,120 @@ def _petroli(relieve_suelo):
     return (ox, oy), texturas, geos, (np.array(col_v, float), np.array(col_i))
 
 
+PASARELA = dict(a=(436801.9, 4587833.4), b=(436778.9, 4587848.3), alto=7.0)  # sobre las vías, junto al Petroli
+
+
+def textura_acero_rojo(lado=256, semilla=5):
+    """Chapa de acero pintada de rojo, algo gastada."""
+    r = np.random.default_rng(semilla)
+    a = np.empty((lado, lado, 3), np.float32)
+    a[...] = (168, 32, 30)
+    a += r.normal(0, 5, (lado, lado, 1))
+    return Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), "RGB")
+
+
+def textura_barandilla_roja():
+    a = np.asarray(textura_barandilla()).copy()
+    a[..., :3] = (170, 30, 28)
+    return Image.fromarray(a, "RGBA")
+
+
+def _pasarela(relieve_suelo):
+    """Pasarela peatonal roja sobre las vías de Renfe junto al Pont del Petroli: tablero a 7 m sobre la vía,
+    barandillas, pilares en los extremos y una escalera de dos tramos en cada lado, paralela a las vías."""
+    a, b = np.array(PASARELA["a"]), np.array(PASARELA["b"])
+    eje = (b - a) / np.linalg.norm(b - a)
+    lat = np.array([-eje[1], eje[0]])  # a lo largo de las vías
+    o = (a + b) / 2
+    zv = float(np.nanmedian([relieve_suelo(*(a + (b - a) * t)) for t in np.linspace(0.3, 0.7, 5)]))
+    zd = zv + PASARELA["alto"]
+    ancho, canto = 2.6, 0.8
+    rojo, barandilla, peldanos = _Lista(), _Lista(), _Lista()
+    col_v, col_i = [], []
+
+    def col_quad(p):
+        col_i.extend([(len(col_v), len(col_v) + 1, len(col_v) + 2), (len(col_v), len(col_v) + 2, len(col_v) + 3)])
+        col_v.extend(p)
+
+    def L(p, z):  # punto UTM 2D + cota -> local
+        return (p[0] - o[0], p[1] - o[1], z)
+
+    def caja(c, u, w, largo, z0, z1, lista, uv=1.0):
+        """Prisma recto de base largo (según u) x w (según la perpendicular) centrado en c."""
+        v = np.array([-u[1], u[0]])
+        esq = [c - u * largo / 2 - v * w / 2, c + u * largo / 2 - v * w / 2, c + u * largo / 2 + v * w / 2,
+               c - u * largo / 2 + v * w / 2]
+        for k in range(4):
+            p0, p1 = esq[k], esq[(k + 1) % 4]
+            n = (p0 + p1) / 2 - c
+            n = n / (np.linalg.norm(n) + 1e-9)
+            lado = np.linalg.norm(p1 - p0)
+            lista.cara([L(p0, z0), L(p1, z0), L(p1, z1), L(p0, z1)], (*n, 0.0),
+                       [(0, 0), (lado / uv, 0), (lado / uv, (z1 - z0) / uv), (0, (z1 - z0) / uv)])
+        lista.cara([L(e, z1) for e in esq], (0, 0, 1.0), [(0, 0), (largo / uv, 0), (largo / uv, w / uv), (0, w / uv)])
+        lista.cara([L(e, z0) for e in esq[::-1]], (0, 0, -1.0), [(0, 0), (w / uv, 0), (w / uv, largo / uv), (0, largo / uv)])
+        return esq
+
+    # tablero con rellanos de 3 m en cada extremo
+    largo = float(np.linalg.norm(b - a)) + 6.0
+    esq = caja(o, eje, ancho, largo, zd - canto, zd, rojo, 2.0)
+    col_quad([L(e, zd) for e in esq])
+    for s in (-1, 1):  # barandillas a los dos lados del tablero
+        p0, p1 = o - eje * largo / 2 + lat * s * (ancho / 2 - 0.05), o + eje * largo / 2 + lat * s * (ancho / 2 - 0.05)
+        q = [L(p0, zd), L(p1, zd), L(p1, zd + 1.2), L(p0, zd + 1.2)]
+        quv = [(0, 0), (largo / 0.96, 0), (largo / 0.96, 1), (0, 1)]
+        barandilla.cara(q, (*(lat * s), 0.0), quv)
+        barandilla.cara(q, (*(-lat * s), 0.0), quv)
+        col_quad(q)
+    # escaleras: en el extremo de A hacia un lado de las vías, en el de B hacia el otro; dos tramos con rellano
+    for fin, sentido in ((a - eje * 1.5, 1), (b + eje * 1.5, -1)):
+        z0 = float(relieve_suelo(*fin))
+        sube = zd - z0
+        n = max(int(round(sube / 0.17)), 2)
+        huella = 0.30
+        mitad = n // 2
+        ancho_e = 1.8
+        inicio = fin + lat * sentido * (ancho / 2)  # arranca en el borde del rellano
+        for tramo, (k0, k1) in enumerate(((0, mitad), (mitad, n))):
+            # tramo 1 baja desde el tablero; rellano de 1,5 m; tramo 2 sigue en la misma dirección
+            for k in range(k0, k1):
+                d = (k + 0.5) * huella + (1.5 if tramo else 0.0)
+                c = inicio + lat * sentido * d
+                zt = zd - (k + 1) * 0.17 * sube / (n * 0.17)
+                caja(c, lat, ancho_e, huella, zt - 0.17, zt, peldanos, 1.0)
+            if tramo == 0:
+                zr = zd - mitad * sube / n
+                c = inicio + lat * sentido * (mitad * huella + 0.75)
+                caja(c, lat, ancho_e, 1.5, zr - 0.25, zr, rojo, 2.0)
+                caja(c + eje * 0.6, lat, 0.3, 0.3, z0, zr - 0.25, rojo, 2.0)  # pilar del rellano
+                caja(c - eje * 0.6, lat, 0.3, 0.3, z0, zr - 0.25, rojo, 2.0)
+        total = n * huella + 1.5
+        # colisión: rampa de cada tramo y rellano (andar por los peldaños como por una rampa)
+        def punto(d, z, s):
+            return L(inicio + lat * sentido * d + eje * s * ancho_e / 2, z)
+        zr = zd - mitad * sube / n
+        col_quad([punto(0, zd, -1), punto(mitad * huella, zr, -1), punto(mitad * huella, zr, 1), punto(0, zd, 1)])
+        col_quad([punto(mitad * huella, zr, -1), punto(mitad * huella + 1.5, zr, -1), punto(mitad * huella + 1.5, zr, 1),
+                  punto(mitad * huella, zr, 1)])
+        col_quad([punto(mitad * huella + 1.5, zr, -1), punto(total, z0, -1), punto(total, z0, 1),
+                  punto(mitad * huella + 1.5, zr, 1)])
+        for s in (-1, 1):  # barandillas de la escalera
+            q = [punto(0, zd, s), punto(total, z0, s), punto(total, z0 + 1.0, s), punto(0, zd + 1.0, s)]
+            quv = [(0, 0), (total / 0.96, 0), (total / 0.96, 1), (0, 1)]
+            barandilla.cara(q, (*(eje * s), 0.0), quv)
+            barandilla.cara(q, (*(-eje * s), 0.0), quv)
+        # pilares bajo el rellano del tablero
+        for s in (-1, 1):
+            caja(fin + lat * s * 0.9, eje, 0.4, 0.4, z0, zd - canto, rojo, 2.0)
+    geos = [rojo.geo("mo_acero_rojo"), peldanos.geo("mo_hormigon"), barandilla.geo("mo_barandilla_roja", recorte=True)]
+    texturas = {"mo_acero_rojo": textura_acero_rojo(), "mo_hormigon": textura_hormigon(),
+                "mo_barandilla_roja": textura_barandilla_roja()}
+    return (o[0], o[1]), texturas, geos, (np.array(col_v, float), np.array(col_i))
+
+
 MONUMENTOS = [
+    dict(nombre="pasarela_petroli", ancla=(np.array(PASARELA["a"]) + PASARELA["b"]) / 2, radio_excluir=[],
+         construir=_pasarela),
     dict(nombre="pont_petroli", ancla=np.asarray(PETROLI).mean(0), radio_excluir=[], construir=_petroli),
     dict(nombre="magic_bola", ancla=np.array(MAGIC["c"]), radio_excluir=[(MAGIC["c"], MAGIC["r"] - 0.5)],
          construir=_magic),

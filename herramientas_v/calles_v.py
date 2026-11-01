@@ -444,9 +444,10 @@ def _tapas(vias, calzada, casilla):
     return centros, ejes
 
 
-def construir(osm, edificios, z, e0, n0, lado, paso, cubierto=None):
+def construir(osm, edificios, z, e0, n0, lado, paso, cubierto=None, hoyos=None):
     """edificios: lista de Polygon (UTM) del Catastro alrededor de la casilla. cubierto: si es una lista, se le
-    añade lo que tapan calzada, aceras y aparcamientos (para hundir ahí el terreno que se ve)."""
+    añade lo que tapan calzada, aceras y aparcamientos (para hundir ahí el terreno que se ve). hoyos: hoyos del
+    terreno ya rellenados (rampas de parking): se pavimentan como aparcamiento."""
     marco = 30.0
     caja = (e0 - marco, n0 - marco, e0 + lado + marco, n0 + lado + marco)
     casilla = box(e0, n0, e0 + lado, n0 + lado)
@@ -457,6 +458,8 @@ def construir(osm, edificios, z, e0, n0, lado, paso, cubierto=None):
     calzada = calzada.difference(construido)
     aparc = _poligonos(osm, caja, lambda t: t.get("amenity") == "parking" and t.get("parking") in
                        (None, "surface", "street_side", "lane", "yes") and (_num(t.get("layer")) or 0) >= -1)
+    if hoyos is not None and not hoyos.is_empty:
+        aparc = aparc + [hoyos]
     aparc = shapely.union_all(aparc).difference(construido).difference(calzada) if aparc else Polygon()
     plazas = _poligonos(osm, caja, lambda t: t.get("area:highway") in ("pedestrian", "footway")
                         or t.get("place") == "square" or (t.get("highway") == "pedestrian" and t.get("area") == "yes"))
@@ -516,6 +519,21 @@ def _vias_a_nivel(osm, casilla, suelo, centro):
     import puentes_v
     obra = puentes_v.Obra(centro)
     caja = casilla.bounds
+    # lo que tapan los puentes (carreteras y vías elevadas) cerca de la casilla: ahí no va catenaria
+    tapa = []
+    for v in osm["vias"]:
+        t = v["tags"]
+        if t.get("bridge") in (None, "no") or len(v["xy"]) < 2 or not (t.get("highway") or t.get("railway")):
+            continue
+        xy = np.asarray(v["xy"], float)
+        if xy[:, 0].max() < caja[0] - 60 or xy[:, 0].min() > caja[2] + 60 or \
+                xy[:, 1].max() < caja[1] - 60 or xy[:, 1].min() > caja[3] + 60:
+            continue
+        w = ancho_calzada(t) if t.get("highway") in CARRILES else 6.0
+        tapa.append(LineString(xy).buffer(w / 2 + 3.0, cap_style="flat"))
+    bajo = shapely.union_all(tapa) if tapa else None
+    if bajo is not None:
+        shapely.prepare(bajo)
     for v in osm["vias"]:
         t = v["tags"]
         rw = t.get("railway")
@@ -554,17 +572,21 @@ def _vias_a_nivel(osm, casilla, suelo, centro):
                 obra.extruir(eje, "vi_hierro", [(o + 0.035, 0.18), (o - 0.035, 0.18), (o - 0.07, 0.0), (o + 0.07, 0.0)],
                              lados=[0, 1, 3], escala=1.0)
             if rw in ("rail", "light_rail") and t.get("electrified") not in ("no",):
-                _catenaria(obra, eje)
+                _catenaria(obra, eje, bajo=bajo)
     return obra.m.arrays()
 
 
-def _catenaria(obra, eje, entre=50.0):
+def _catenaria(obra, eje, entre=50.0, bajo=None):
     """Postes de la catenaria cada 'entre' m a la derecha de la vía (perfil de 0,25 m y 7 m de alto) con la
-    ménsula hasta encima del carril a 6,2 m y el hilo de contacto a 5,5 m entre poste y poste."""
+    ménsula hasta encima del carril a 6,2 m y el hilo de contacto a 5,5 m entre poste y poste. 'bajo': lo que
+    tapan los puentes de encima; ahí no hay postes ni hilo (atravesaban el tablero de la C-31)."""
     pts, der, ds, z = eje
     altos = []
     for d in np.arange(np.ceil(ds[0] / entre) * entre, ds[-1], entre):
         i = int(np.clip(np.searchsorted(ds, d), 0, len(ds) - 1))
+        if bajo is not None and shapely.intersects_xy(bajo, *(pts[i] + der[i] * 2.9)):
+            altos.append(None)
+            continue
         base = np.r_[pts[i] + der[i] * 2.9 - obra.c, z[i] - 0.3]
         lat = np.r_[der[i], 0.0]
         tan = np.r_[-der[i, 1], der[i, 0], 0.0]
@@ -586,6 +608,9 @@ def _catenaria(obra, eje, entre=50.0):
         altos.append(np.r_[pts[i] - obra.c, z[i] + 5.5])
     # hilo de contacto entre ménsulas: tira de 3 cm vista desde abajo y de lado
     for p0, p1 in zip(altos[:-1], altos[1:]):
+        if p0 is None or p1 is None or (bajo is not None and shapely.intersects(
+                bajo, LineString([p0[:2] + obra.c, p1[:2] + obra.c]))):
+            continue
         d = p1[:2] - p0[:2]
         n = np.r_[-d[1], d[0], 0.0] / (np.linalg.norm(d) + 1e-9) * 0.015
         obra.cara("vi_hierro", [p0 - n, p1 - n, p1 + n, p0 + n], [(0, 0), (1, 0), (1, 1), (0, 1)], np.array([0, 0, -1.0]))
