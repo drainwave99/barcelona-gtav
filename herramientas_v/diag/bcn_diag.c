@@ -150,6 +150,27 @@ static void comprobar_modelos(void)
     }
 }
 
+/* bcn_modelos.txt (si está): un nombre de modelo por línea; apunta en el registro si el juego lo conoce
+ * (para saber qué paquetes DLC se han montado) */
+static void comprobar_lista(void)
+{
+    char n[128], t[256];
+    FILE *f = fopen("bcn_modelos.txt", "r");
+    if (!f) return;
+    while (fscanf(f, "%127s", n) == 1) {
+        if (!strncmp(n, "dlc:", 4)) {  /* "dlc:<nameHash>": IS_DLC_PRESENT (¿el juego ha registrado el paquete?) */
+            sh_init(0x812595A0644CE1DEULL); pi(hash(n + 4));
+            snprintf(t, sizeof t, "DLC %s presente=%d", n + 4, (int)(*llamar() & 1));
+            if (registro) { fprintf(registro, "%s\n", t); fflush(registro); }
+            continue;
+        }
+        uint32_t m = hash(n);
+        snprintf(t, sizeof t, "MODELO %s en_imagen=%d valido=%d", n, en_imagen(m), valido(m));
+        if (registro) { fprintf(registro, "%s\n", t); fflush(registro); }
+    }
+    fclose(f);
+}
+
 static void comprobar_ymaps(void)
 {
     char t[256];
@@ -272,6 +293,7 @@ static void principal(void)
         FILE *fv = fopen("bcn_vistas.txt", "r");  /* con vistas propias, solo las vistas */
         if (fv) fclose(fv);
         if (!fv) comprobar_modelos();
+        comprobar_lista();
         ir_a_pruebas();
         if (!fv) probar_colision();
         avisar("AUTO FIN");

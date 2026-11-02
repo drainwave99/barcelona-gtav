@@ -157,7 +157,8 @@ def lista_ipl():
     for linea in r.stdout.splitlines():
         if linea.strip():
             n = re.split(r"[\\/]", linea.split()[0])[-1].lower()
-            if n.endswith(".ymap") and not n.startswith(config_v.PREFIJO):
+            # los nuestros son bcn_, bcn2_, bcn3_... (los ymap de cada paquete llevan su nombre)
+            if n.endswith(".ymap") and not re.match(r"bcn\d*_", n):
                 nombres.add(n[:-5])
     (GTA / "bcn_ipl_fuera.txt").write_text("\n".join(sorted(nombres)) + "\n", encoding="utf-8")
     print(f"bcn_ipl_fuera.txt: {len(nombres)} ymap del juego")

@@ -89,7 +89,9 @@ static void cargar_ipl(void)
         char *fin = p + strcspn(p, "\r\n");
         int hay_mas = *fin != 0;
         *fin = 0;
-        if (*p) ipl[n_ipl++] = p;
+        /* nunca los nuestros (bcn_, bcn2_, bcn3_...): apagarlos deja el paquete entero sin dibujar */
+        int nuestro = !strncmp(p, "bcn", 3) && (p[3 + strspn(p + 3, "0123456789")] == '_');
+        if (*p && !nuestro) ipl[n_ipl++] = p;
         p = hay_mas ? fin + 1 : fin;
         while (*p == '\r' || *p == '\n') p++;
     }
@@ -153,12 +155,41 @@ static const char *HISTORIA[] = {
 };
 #define N_HISTORIA ((int)(sizeof HISTORIA / sizeof HISTORIA[0]))
 
+static void parar_hilos(int avisar)
+{
+    static char ya[N_HISTORIA];
+    int n = 0;
+    sh_init(0xDADFADA5A20143A8ULL); llamar();  /* SCRIPT_THREAD_ITERATOR_RESET */
+    for (;;) {
+        sh_init(0x30B4FA1C82DD4B9FULL);  /* SCRIPT_THREAD_ITERATOR_GET_NEXT_THREAD_ID */
+        int id = (int)*llamar();
+        if (!id || n++ > 400) break;
+        sh_init(0x05A42BA9FC8DA96BULL); pi(id);  /* GET_NAME_OF_SCRIPT_WITH_THIS_ID */
+        const char *nom = (const char *)(uintptr_t)*llamar();
+        if (!nom) continue;
+        for (int i = 0; i < N_HISTORIA; i++) {
+            if (_stricmp(nom, HISTORIA[i])) continue;
+            sh_init(0xC8B189ED9138BCD4ULL); pi(id); llamar();  /* TERMINATE_THREAD */
+            if (avisar && !ya[i]) {
+                ya[i] = 1;
+                char t[128];
+                snprintf(t, sizeof t, "hilo terminado: %s", nom);
+                apuntar(t);
+            }
+            break;
+        }
+    }
+}
+
 static void parar_historia(int avisar)
 {
+    parar_hilos(avisar);
+    static char ya[N_HISTORIA];  /* al registro solo la primera vez (los re_* vuelven a lanzarse sin parar) */
     for (int i = 0; i < N_HISTORIA; i++) {
         if (corriendo(HISTORIA[i]) > 0) {
             parar(HISTORIA[i]);
-            if (avisar) {
+            if (avisar && !ya[i]) {
+                ya[i] = 1;
                 char t[128];
                 snprintf(t, sizeof t, "parado: %s", HISTORIA[i]);
                 apuntar(t);
@@ -175,7 +206,8 @@ static void a_barcelona(const char *por_que)
     congelar(ped, 1);
     mover(ped, salida_x, salida_y, 200.0f);
     int hay = 0;
-    for (int i = 0; i < 100 && !(hay = suelo(salida_x, salida_y, &z)); i++) {
+    for (int i = 0; i < 1200 && !(hay = suelo(salida_x, salida_y, &z)); i++) {  /* hasta 2 min: el mapa es grande */
+        if (i == 50) mover(ped, salida_x, salida_y, 60.0f);  /* más cerca del suelo, para que cargue antes */
         pedir_colision(salida_x, salida_y, 20.0f);
         sh_wait(100);
     }
@@ -187,6 +219,23 @@ static void a_barcelona(const char *por_que)
     char t[160];
     snprintf(t, sizeof t, "a Barcelona (%s): suelo=%d z=%.1f", por_que, hay, z);
     apuntar(t);
+}
+
+/* Apunta en el registro los scripts que siguen vivos (para saber cuáles de la historia faltan en la lista) */
+static void apuntar_scripts(void)
+{
+    char t[200];
+    int n = 0;
+    sh_init(0xDADFADA5A20143A8ULL); llamar();  /* SCRIPT_THREAD_ITERATOR_RESET */
+    for (;;) {
+        sh_init(0x30B4FA1C82DD4B9FULL);  /* SCRIPT_THREAD_ITERATOR_GET_NEXT_THREAD_ID */
+        int id = (int)*llamar();
+        if (!id || n++ > 300) break;
+        sh_init(0x05A42BA9FC8DA96BULL); pi(id);  /* GET_NAME_OF_SCRIPT_WITH_THIS_ID */
+        const char *nom = (const char *)(uintptr_t)*llamar();
+        snprintf(t, sizeof t, "vivo: %s", nom ? nom : "?");
+        apuntar(t);
+    }
 }
 
 static void principal(void)
@@ -202,6 +251,8 @@ static void principal(void)
     parar_historia(1);
     apagar_ipl();
     a_barcelona("inicio");
+    DWORD inicio = GetTickCount();
+    int listado = 0;
     int estaba_muerto = 0, estaba_detenido = 0;
     DWORD ultimo = GetTickCount();
     for (;;) {
@@ -214,6 +265,12 @@ static void principal(void)
             sh_wait(1500);
             a_barcelona(estaba_muerto ? "muerte" : "detencion");
             estaba_muerto = estaba_detenido = 0;
+        }
+        if (!listado && GetTickCount() - inicio >= 30000) { listado = 1; apuntar_scripts(); }
+        static DWORD ultimo_hilo;
+        if (GetTickCount() - ultimo_hilo >= 500) {  /* "main" vuelve a lanzar algunos (comms, triggers...) */
+            parar_hilos(1);
+            ultimo_hilo = GetTickCount();
         }
         if (GetTickCount() - ultimo >= 3000) {
             parar_historia(1);
