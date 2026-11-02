@@ -135,7 +135,7 @@ def cargar():
             with open(f, "rb") as fh:
                 edificios += [p["anillos"][0] for p in pickle.load(fh)["partes"]
                               if not prototipo.construccion_gigante(p)]
-    hojas = [h.name for h in (config_v.MOD / "prototipo").iterdir() if h.name.isdigit()]
+    hojas = config_v.hojas()
     import costa_v
     return osm, edificios, hojas, costa_v.mar()
 

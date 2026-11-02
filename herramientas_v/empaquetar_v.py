@@ -269,8 +269,7 @@ def main():
     global PACK, OBRA
     cambiadas = "--cambiadas" in sys.argv  # todas las hojas, pero solo se rehacen los paquetes con alguna cambiada
     hojas = sorted(a for a in sys.argv[1:] if not a.startswith("-"))
-    todas = sorted(h.name for h in (config_v.MOD / "prototipo").iterdir() if h.name.isdigit()
-                   and (config_v.MOD / "prototipo" / h.name / "colocacion.pkl").exists())
+    todas = config_v.hojas(con_colocacion=True)
     rep = reparto(todas if cambiadas and not hojas else hojas)
     if not _juego_abierto():  # lo instalado ahora, para poder volver si lo nuevo falla
         import versiones_v

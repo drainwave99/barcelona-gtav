@@ -144,7 +144,7 @@ def escribir(carpeta, osm=None, hojas=None):
         with open(config_v.DATOS / "osm.pkl", "rb") as fh:
             osm = pickle.load(fh)
     if hojas is None:
-        hojas = [h.name for h in (config_v.MOD / "prototipo").iterdir() if h.name.isdigit()]
+        hojas = config_v.hojas()
     pos, aristas, clase_de = grafo(osm, hojas)
     vecinos = defaultdict(list)  # nodo -> [(otro, carriles hacia él, carriles desde él)]
     for (a, b), at in aristas.items():

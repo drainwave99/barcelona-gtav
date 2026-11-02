@@ -176,7 +176,7 @@ def agua():
     import costa_v
     mar = costa_v.mar().buffer(20)
     shapely.prepare(mar)
-    hojas = [h.name for h in (config_v.MOD / "prototipo").iterdir() if re.fullmatch(r"\d{6}", h.name)]
+    hojas = config_v.hojas()
     xs = np.arange(-AGUA_LADO, AGUA_LADO, AGUA_PASO) + AGUA_PASO / 2
     X, Y = np.meshgrid(xs, xs)
     E, N = config_v.juego_a_utm(X, Y)

@@ -31,3 +31,22 @@ def utm_a_juego(e, n):
 
 def juego_a_utm(x, y):
     return x + ORIGEN_E - DESP_X, y + ORIGEN_N - DESP_Y
+
+
+# Hojas generadas que se dejan fuera del mapa (2026-11-02): Montcada y la sierra de encima, la vertiente del Vallès
+# de Collserola (el Tibidabo, 426585, se queda), la Zona Franca pasado el puerto y Montgat. Siguen en
+# mod_v/prototipo: quitarlas de aquí las vuelve a meter.
+HOJAS_FUERA = set("""
+429589 429590 429594 430590 430591 430592 430593 430594 431591 431592 431593 431594 432591 432592 432593 432594
+433591 433592 433593 433594 434591 434594 435594
+426586 426587 426588 427588 427589 428589
+426578 427578
+438591
+""".split())
+
+
+def hojas(con_colocacion=False):
+    """Las hojas del mapa (mod_v/prototipo/<EEENNN>, sin HOJAS_FUERA), ordenadas."""
+    base = MOD / "prototipo"
+    return sorted(h.name for h in base.iterdir() if len(h.name) == 6 and h.name.isdigit() and h.name not in HOJAS_FUERA
+                  and (not con_colocacion or (h / "colocacion.pkl").exists()))
