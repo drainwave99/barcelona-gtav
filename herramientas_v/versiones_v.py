@@ -17,7 +17,8 @@ import config_v
 GTA = config_v.Path(r"C:\Program Files (x86)\Steam\steamapps\common\Grand Theft Auto V")
 DLCPACKS = GTA / "mods" / "update" / "x64" / "dlcpacks"
 VERSIONES = config_v.MOD / "versiones"
-GUARDAR = 4  # las más viejas se borran (cada una pesa lo que todos los paquetes juntos)
+GUARDAR = 1  # copias automáticas "antes" que se guardan; las más viejas se borran (pesan ~13 GB cada una)
+FIJA = "ALPHA"  # las versiones con esto en el nombre no se borran nunca (alpha: paquetes + update.rpf + plugins en _juego)
 
 
 def _commit():
@@ -38,7 +39,7 @@ def guardar(nota=""):
     for p in paquetes:
         (destino / p).mkdir(parents=True, exist_ok=True)
         shutil.copy2(DLCPACKS / p / "dlc.rpf", destino / p / "dlc.rpf")
-    for vieja in sorted(VERSIONES.iterdir())[:-GUARDAR]:
+    for vieja in [d for d in sorted(VERSIONES.iterdir()) if FIJA not in d.name][:-GUARDAR]:
         shutil.rmtree(vieja, ignore_errors=True)
     print("Versión guardada:", nombre, "(" + ", ".join(paquetes) + ")")
     return destino
@@ -50,6 +51,11 @@ def volver(nombre):
         (DLCPACKS / p).mkdir(parents=True, exist_ok=True)
         shutil.copy2(origen / p / "dlc.rpf", DLCPACKS / p / "dlc.rpf")
         print("Instalado", p, "de", nombre)
+    juego = origen / "_juego"  # update.rpf sin Los Santos y los plugins de esa versión
+    if juego.exists():
+        for f in juego.iterdir():
+            shutil.copy2(f, (GTA / "mods" / "update" / f.name) if f.name == "update.rpf" else GTA / f.name)
+            print("Instalado", f.name)
     for p in instalados():  # paquetes que esa versión no tenía: se apagan (sin borrarlos)
         if not (origen / p / "dlc.rpf").exists():
             (DLCPACKS / p / "dlc.rpf").rename(DLCPACKS / p / "dlc.rpf.off")
