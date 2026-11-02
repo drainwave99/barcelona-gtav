@@ -132,20 +132,13 @@ def construir(vols, vecinos, info, colores, calles, origen, casilla):
         anillos = [(np.asarray(poli.exterior.coords), False)] + [(np.asarray(h.coords), True) for h in poli.interiors]
         for anillo, es_patio in anillos:
             s = 0.0
-            for a, b in zip(anillo[:-1], anillo[1:]):
+            tramos = [t for a0, b0 in zip(anillo[:-1], anillo[1:]) if np.hypot(*(b0 - a0)) >= 0.05
+                      for t in _tramos_pared(a0, b0, vol, vecinos, arbol, suelo)]
+            for a, b, altura_vecino in tramos:
                 largo = float(np.hypot(*(b - a)))
-                if largo < 0.05:
-                    continue
                 d = (b - a) / largo
                 normal = np.array([d[1], -d[0]])
-                medio = (a + b) / 2
-                sonda = Point(*(medio + normal * 0.6))
-                altura_vecino = 0.0
-                for k in arbol.query(sonda, predicate="intersects"):
-                    otro = vecinos[k]
-                    if otro is not vol and not otro.get("sobre_paso"):  # lo que va sobre un pasaje no tapa
-                        # la pared de abajo
-                        altura_vecino = max(altura_vecino, otro["techo"] - suelo)
+                sonda = Point(*((a + b) / 2 + normal * 0.6))
                 la, lb = a - [e0 + centro, n0 + centro], b - [e0 + centro, n0 + centro]
                 if altura_vecino > 0:
                     if altura_vecino < techo - suelo - 0.3:
@@ -172,6 +165,31 @@ def construir(vols, vecinos, info, colores, calles, origen, casilla):
                        i=np.arange(len(v)).reshape(-1, 3))
     return tejados, malla.arrays()
 
+
+
+def _tramos_pared(a, b, vol, vecinos, arbol, suelo, paso=1.0):
+    """Trozos (a', b', altura del vecino) de la pared a-b: lo que tapa el edificio de al lado se mira cada metro
+    (antes solo en el centro de la pared: con un vecino alto que solo cubría el medio, el resto de la pared no se
+    hacía y quedaban tiras de edificio flotando con el cielo debajo)."""
+    largo = float(np.hypot(*(b - a)))
+    d = (b - a) / largo
+    normal = np.array([d[1], -d[0]])
+    n = max(1, int(np.ceil(largo / paso)))
+    t = (np.arange(n) + 0.5) / n
+    sondas = shapely.points(a[0] + (b[0] - a[0]) * t + normal[0] * 0.6, a[1] + (b[1] - a[1]) * t + normal[1] * 0.6)
+    alt = np.zeros(n)
+    i_s, i_v = arbol.query(sondas, predicate="intersects")
+    for i, k in zip(i_s, i_v):
+        otro = vecinos[k]
+        if otro is not vol and not otro.get("sobre_paso"):  # lo que va sobre un pasaje no tapa la pared de abajo
+            alt[i] = max(alt[i], otro["techo"] - suelo)
+    alt = np.round(alt, 1)
+    out, ini = [], 0
+    for i in range(1, n + 1):
+        if i == n or alt[i] != alt[ini]:
+            out.append((a + (b - a) * (ini / n), a + (b - a) * (i / n), float(alt[ini])))
+            ini = i
+    return out
 
 def arbol_calles(osm):
     """STRtree de las calles por donde se anda o circula (no autopistas elevadas ni caminos de monte)."""
