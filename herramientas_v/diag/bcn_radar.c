@@ -4,6 +4,7 @@
  * de Barcelona que hace radar_v.py (DLC bcnradar: texturas bcnradar_<bx>_<by> de 2 m/px y bcnradar_mapa):
  *   - radar abajo a la izquierda, girando con la cámara, con la flecha del jugador, el norte y la vida/blindaje;
  *     se aleja al ir rápido en un vehículo;
+ *   - el mapa del menú de pausa (ESC) es el del juego con las texturas de mapa_pausa_v.py (no es de aquí);
  *   - tecla M: mapa grande (rueda: zoom; arrastrar con el ratón o WASD/flechas: mover; clic derecho o Intro: ir
  *     a ese punto; M o Retroceso: cerrar).
  * El radar se dibuja en celdas pequeñas (un trozo de textura cada una, girado): así queda recortado en su marco.
@@ -153,28 +154,39 @@ static void leer_rejilla(void)
 
 static void nombre_bloque(char *s, int bx, int by) { sprintf(s, "bcnradar_%d_%d", bx, by); }
 
-/* ¿se puede dibujar el bloque? (lo pide si no) */
+/* ¿se puede dibujar el bloque? Lo pide mientras no esté: el juego puede descargarlo para hacer sitio (al ir
+   deprisa se cargan muchas cosas) y, si solo se pedía una vez, el radar se quedaba con el plano general, borroso */
+static char listo_antes[64][64];
+static int perdidos;
 static int bloque_listo(int bx, int by)
 {
     if (bx < 0 || by < 0 || bx >= NBX || by >= NBY || !hay[bx][by]) return 0;
     char n[32];
     nombre_bloque(n, bx, by);
     usado[bx][by] = GetTickCount();
-    if (!cargado[bx][by]) { pedir_ytd(n); cargado[bx][by] = 1; }
-    return ytd_listo(n);
+    cargado[bx][by] = 1;
+    int ok = ytd_listo(n);
+    if (!ok) {
+        pedir_ytd(n);
+        if (listo_antes[bx][by]) { listo_antes[bx][by] = 0; perdidos++; }
+    } else listo_antes[bx][by] = 1;
+    return ok;
 }
 
-/* suelta los bloques que llevan 20 s sin usarse */
+/* suelta los bloques lejanos (a más de un bloque del jugador) que llevan 30 s sin usarse */
+static float jug_x, jug_y;
 static void soltar_viejos(void)
 {
     DWORD ahora = GetTickCount();
+    int pbx = (int)floorf((jug_x - X0) / BLOQUE), pby = (int)floorf((jug_y - Y0) / BLOQUE);
     for (int bx = 0; bx < NBX; bx++)
         for (int by = 0; by < NBY; by++)
-            if (cargado[bx][by] && ahora - usado[bx][by] > 20000) {
+            if (cargado[bx][by] && ahora - usado[bx][by] > 30000 && (abs(bx - pbx) > 1 || abs(by - pby) > 1)) {
                 char n[32];
                 nombre_bloque(n, bx, by);
                 soltar_ytd(n);
                 cargado[bx][by] = 0;
+                listo_antes[bx][by] = 0;
             }
 }
 
@@ -308,16 +320,23 @@ static void dibujar_radar(int ped)
     while (C * S * 1080.0f < 8.0f && C < 128) C *= 2;
 
     if (!mapa_listo) return;
-    /* los bloques de alrededor se piden antes de que entren en el marco */
+    /* los bloques de alrededor (1 km) y los de delante (hasta 2,5 km según la velocidad) se piden antes de que
+       entren en el marco */
+    jug_x = px; jug_y = py;
     {
-        int pbx = (int)floorf((px - X0) / BLOQUE), pby = (int)floorf((py - Y0) / BLOQUE);
+        float vx = 0, vy = 0;
+        if (coche) { sh_init(0x4805D2B1D8CF94A9ULL); pi(vehiculo(ped)); uint64_t *r = llamar(); vx = rf(r, 0); vy = rf(r, 1); }
         for (int i = -1; i <= 1; i++)
             for (int j = -1; j <= 1; j++) {
-                float ex = px + i * 700.0f, ey = py + j * 700.0f;   /* los que están a menos de 700 m */
-                int qx = (int)floorf((ex - X0) / BLOQUE), qy = (int)floorf((ey - Y0) / BLOQUE);
-                if (qx != pbx || qy != pby || (i == 0 && j == 0)) bloque_listo(qx, qy);
+                bloque_listo((int)floorf((px + i * 1000.0f - X0) / BLOQUE), (int)floorf((py + j * 1000.0f - Y0) / BLOQUE));
+                for (int k = 1; k <= 3; k++) {   /* hacia donde va: a 20, 40 y 60 s */
+                    float ex = px + vx * 20.0f * k + i * 600.0f, ey = py + vy * 20.0f * k + j * 600.0f;
+                    if (vx * vx + vy * vy > 25.0f && fabsf(vx * 20.0f * k) < 2500 && fabsf(vy * 20.0f * k) < 2500)
+                        bloque_listo((int)floorf((ex - X0) / BLOQUE), (int)floorf((ey - Y0) / BLOQUE));
+                }
             }
     }
+    int celdas = 0;
     orden(1);
     sprite("bcnradar_mapa", "mar", cx, cy, W / a, H, 0, 235);
     /* zona del mundo que cae en el marco (caja del rectángulo girado) */
@@ -335,6 +354,7 @@ static void dibujar_radar(int ped)
                 continue;
             int bx = (int)floorf((gx - X0) / BLOQUE), by = (int)floorf((gy - Y0) / BLOQUE);
             float bx0 = X0 + bx * BLOQUE, by0 = Y0 + by * BLOQUE;
+            celdas++;
             if (!bloque_listo(bx, by)) {
                 /* aún no ha llegado el bloque fino: el plano general (siempre cargado), no el azul del mar */
                 if (bx < 0 || by < 0 || bx >= NBX || by >= NBY || !hay[bx][by]) continue;
@@ -360,6 +380,18 @@ static void dibujar_radar(int ped)
             /* un pelín más grande para que no se vean juntas */
             sprite_uv(d, t, sx / a, sy, (lado * 1.04f) / a, lado * 1.04f, u1, v1, u2, v2,
                       h * 180.0f / 3.14159265f, 255);
+        }
+    }
+    {   /* para ver en el registro si faltan bloques o hay demasiadas celdas */
+        static DWORD t_reg; static int max_celdas, perd_antes;
+        if (celdas > max_celdas) max_celdas = celdas;
+        if (GetTickCount() - t_reg > 10000) {
+            if (perdidos != perd_antes || max_celdas > 0) {
+                char t[96];
+                snprintf(t, sizeof t, "radar: hasta %d celdas, C %.0f m, bloques perdidos %d", max_celdas, C, perdidos);
+                apuntar(t);
+            }
+            t_reg = GetTickCount(); max_celdas = 0; perd_antes = perdidos;
         }
     }
     /* marco: tapa lo que sale de las celdas del borde */
@@ -515,8 +547,8 @@ static void dibujar_mapa(int ped)
     liso(cux, cuy, 0.0015f / a, 0.012f, 255, 255, 255, 220);
     liso(0.5f, 0.975f, 1.0f, 0.05f, 0, 0, 0, 160);
     orden(8);
-    texto("Rueda: zoom   Arrastrar o WASD: mover   Clic derecho o Intro: ir aqui   M: cerrar",
-          0.5f, 0.958f, 0.33f, 1);
+    texto("Rueda: zoom   Arrastrar o WASD: mover   Clic derecho o Intro: ir aqui   M o Retroceso: cerrar",
+          0.5f, 0.960f, 0.29f, 1);
     if (control_ya(25) || (GetAsyncKeyState(VK_RETURN) & 1)) {
         mapa_abierto = 0;
         ir_a(ped, wx, wy);

@@ -4,6 +4,7 @@ Santos) y abre el mapa grande con la tecla M.
 
   bcnradar_<bx>_<by>.ytd   un bloque de 2048 m: 4 x 4 texturas t<i><j> de 512 m (256 px, 2 m/px)
   bcnradar_mapa.ytd        el plano entero: m_<bx>_<by> de 2048 m (256 px, 8 m/px), la flecha del jugador
+  (y en mod_v/mapa_pausa, las texturas del mapa del menú de pausa: mapa_pausa_v.py; las mete quitar_ls)
   bcn_radar.txt            (carpeta del juego) la rejilla y los bloques que existen, para el plugin
   bcn_calles.bin           (carpeta del juego) tramos de calle con nombre (OSM) y el municipio de cada cuadro
                            de 100 m (Catastro), para el nombre de la calle bajo el radar
@@ -283,6 +284,7 @@ def main():
     xml.mkdir(parents=True)
     general = {}
     bloques = []
+    enteros = {}
     n = int(BLOQUE / TESELA)
     for bx in range(NBX):
         for by in range(NBY):
@@ -297,7 +299,11 @@ def main():
                     tex[f"t{i}{j}"] = (img.crop(caja), False)
             rage.escribir_ytd(xml / f"{PACK}_{bx}_{by}.ytd.xml", tex)
             general[f"m_{bx}_{by}"] = (img.resize((PX, PX), Image.LANCZOS), False)
+            enteros[(bx, by)] = img
             print(f"bloque {bx},{by}", flush=True)
+    import mapa_pausa_v  # el mismo plano en el mapa del menú de pausa (texturas minimap_sea_*)
+    mapa_pausa_v.teselas(enteros)
+    del enteros
     general["flecha"] = (flecha(), True)
     general["mar"] = (Image.new("RGB", (8, 8), MAR), False)        # fondo: el mismo color que el mar comprimido
     general["blanco"] = (Image.new("RGB", (8, 8), (255, 255, 255)), False)  # se tiñe al dibujar (marco, barras)

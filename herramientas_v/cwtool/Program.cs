@@ -369,7 +369,12 @@ static class Programa
             int ini = 0;
             for (int i = 0; i < tabla.Length && lista.Count < f.EntryCount; i++)
                 if (tabla[i] == 0) { lista.Add(System.Text.Encoding.UTF8.GetString(tabla, ini, i - ini)); ini = i + 1; }
-            if (lista.Count != f.AllEntries.Count) throw new Exception($"{f.Name}: {lista.Count} nombres para {f.AllEntries.Count} entradas");
+            if (lista.Count != f.AllEntries.Count)  // RPF del juego: la tabla no va en orden, pero sus nombres están bien
+            {
+                foreach (var e in f.AllEntries) nombre[e] = e.Name;
+                foreach (var c in f.Children ?? new List<RpfFile>()) Nombres(c);
+                return;
+            }
             int malos = 0;
             for (int i = 0; i < lista.Count; i++)
             {
@@ -400,7 +405,15 @@ static class Programa
                 n++;
             }
         }
-        Sacar(rpf, rpf.Root, carpeta);
+        if (omitir != null && omitir.StartsWith("solo:"))  // solo un RPF de dentro (p. ej. solo:scaleform_generic.rpf)
+        {
+            IEnumerable<RpfFile> Todos(RpfFile f) => (f.Children ?? new List<RpfFile>()).SelectMany(c => Todos(c).Prepend(c));
+            var buscado = omitir.Substring(5);
+            var hijo = Todos(rpf).First(c => c.Path.EndsWith(buscado, StringComparison.OrdinalIgnoreCase));
+            re = null;
+            Sacar(hijo, hijo.Root, carpeta);
+        }
+        else Sacar(rpf, rpf.Root, carpeta);
         Console.WriteLine($"{n} archivos sacados, {fuera} omitidos");
         return 0;
     }

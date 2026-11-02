@@ -15,6 +15,8 @@ se restaura antes desde la copia de seguridad: así se puede volver a ejecutar s
   mods/update/update.rpf/common/data/levels/gta5/traintracks.xml  sin las vías de Los Santos (trenes fantasma)
   mods/update/update.rpf/x64/models/farlods.ydd                vacío: sin las montañas lejanas de San Andreas
                                                                (sustituye al de x64a.rpf, como plantsmgr.ydd)
+  mods/update/update.rpf/x64/(patch/)data/tune/minimap.ymt  la cuadrícula del mapa del menú de pausa (mapa_pausa_v)
+  mods/update/update.rpf/x64/data/cdimages/scaleform_generic.rpf  con las texturas de ese mapa (minimap_sea_*)
 
 Deshacer: python quitar_ls.py --deshacer   (vuelve a poner la copia de seguridad de update.rpf)
 """
@@ -255,6 +257,13 @@ def main():
                                          '</DrawableDictionary>\n', encoding="utf-8")
     rage.a_binario(xml, raiz / "x64" / "models")
     (raiz / "x64" / "levels" / "gta5" / "sp_manifest.ymt").write_text(SP_MANIFEST, encoding="utf-8")
+    # la cuadrícula del mapa del menú de pausa: la de Barcelona (mapa_pausa_v)
+    import mapa_pausa_v
+    ymt = mapa_pausa_v.ymt()
+    for tune in (raiz / "x64" / "data" / "tune", raiz / "x64" / "patch" / "data" / "tune"):  # como farlods.ydd y por si
+        tune.mkdir(parents=True)
+        shutil.copy2(ymt, tune / "minimap.ymt")
+    mapa_pausa_v.meter_en(raiz, GTA, COPIA)
 
     # content.xml: el de dlc_patch de update.rpf manda sobre el del propio paquete
     contenidos = {}
