@@ -230,10 +230,10 @@ def mobiliario(xml, nombre, hoja):
     print(f"{hoja}: {sum(len(g) for g in grupos.values())} árboles y piezas de mobiliario", flush=True)
 
 
-HOJAS_POR_PACK = 40  # (las del Eixample pasan de 150 MB) un RPF no puede pasar de 8 GB (desplazamientos de 23 bits en bloques de 512 B)
+HOJAS_POR_PACK = 10  # paquetes pequeños (2026-11-02): un arreglo en una hoja rehace ~1 GB en ~20 min, no 4 GB en 75 min
 
 
-HOJAS_NUEVAS_POR_PACK = 32  # las hojas que se añadan van a paquetes de hasta 32 (bcn ya roza los 4 GB con 40)
+HOJAS_NUEVAS_POR_PACK = 10  # las hojas que se añadan, igual
 REPARTO = config_v.MOD / "paquetes.json"
 
 
