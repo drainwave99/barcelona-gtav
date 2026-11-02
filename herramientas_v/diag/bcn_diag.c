@@ -316,6 +316,7 @@ static void principal(void)
             ultimo = GetTickCount();
         }
         int f9 = (GetAsyncKeyState(VK_F9) & 0x8000) != 0;
+        static int marcas;
         if (f9 && !antes_f9) {  /* F9: apunta dónde está el jugador (para avisar de fallos del mapa) */
             float x, y, z;
             posicion(jugador(), &x, &y, &z);
@@ -323,11 +324,18 @@ static void principal(void)
             GetLocalTime(&ahora);
             FILE *m = fopen("bcn_marcas.txt", "a");  /* aparte del registro: probar.sh lo vacía */
             if (m) {
-                fprintf(m, "%02d:%02d:%02d %.1f %.1f %.1f\n", ahora.wHour, ahora.wMinute, ahora.wSecond, x, y, z);
+                /* y la cámara (posición, cabeceo y rumbo): con eso se repite la vista exacta (bcn_vistas.txt) */
+                sh_init(0x14D6F5678D8F1B37ULL);  /* GET_GAMEPLAY_CAM_COORD */
+                float *c = (float *)llamar();
+                float cx = c[0], cy = c[2], cz = c[4];
+                sh_init(0x837765A25378F0BBULL); pi(2);  /* GET_GAMEPLAY_CAM_ROT */
+                float *r = (float *)llamar();
+                fprintf(m, "%02d:%02d:%02d %.1f %.1f %.1f cam %.1f %.1f %.1f %.1f %.1f\n", ahora.wHour, ahora.wMinute,
+                        ahora.wSecond, x, y, z, cx, cy, cz, r[0], r[4]);
                 fclose(m);
             }
             char t[128];
-            snprintf(t, sizeof t, "Marca guardada: %.0f %.0f %.0f", x, y, z);
+            snprintf(t, sizeof t, "Marca %d guardada: %.0f %.0f %.0f", ++marcas, x, y, z);
             avisar(t);
         }
         antes_f9 = f9;
