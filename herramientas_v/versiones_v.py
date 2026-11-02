@@ -34,6 +34,14 @@ def guardar(nota=""):
     paquetes = instalados()
     if not paquetes:
         return None
+    # si lo instalado ya está guardado tal cual (mismos paquetes, tamaños y fechas), no se copian otros 13 GB
+    firma = {p: ((DLCPACKS / p / "dlc.rpf").stat().st_size, int((DLCPACKS / p / "dlc.rpf").stat().st_mtime)) for p in paquetes}
+    for v in sorted(VERSIONES.iterdir()) if VERSIONES.exists() else []:
+        suya = {d.name: ((d / "dlc.rpf").stat().st_size, int((d / "dlc.rpf").stat().st_mtime))
+                for d in v.iterdir() if (d / "dlc.rpf").exists()}
+        if suya == firma:
+            print("Ya guardado en", v.name)
+            return v
     nombre = time.strftime("%Y%m%d-%H%M") + "_" + _commit() + (f"_{nota}" if nota else "")
     destino = VERSIONES / nombre
     for p in paquetes:
