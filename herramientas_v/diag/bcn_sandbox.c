@@ -198,6 +198,32 @@ static void parar_historia(int avisar)
     }
 }
 
+static void apuntar_scripts(void);
+
+/* Llamadas de la historia que ya estaban en cola en la partida guardada (Simeon): las lleva el propio móvil,
+   aunque comms_controller esté parado. Si suena el móvil del jugador, se cuelga (como pulsar Retroceso). */
+static void colgar(void)
+{
+    static int veces;
+    int ped = ped_jugador();
+    sh_init(0x1E8E5E20937E3137ULL); pi(ped);  /* IS_PED_RINGTONE_PLAYING */
+    int suena = (int)(*llamar() & 1);
+    sh_init(0x7497D2CE2C30D24CULL);           /* IS_MOBILE_PHONE_CALL_ONGOING */
+    int hablando = (int)(*llamar() & 1);
+    if (!suena && !hablando) return;
+    if (suena) { sh_init(0x6C5AE23EFA885092ULL); pi(ped); llamar(); }  /* STOP_PED_RINGTONE */
+    if (hablando) { sh_init(0xD79DEEFB53455EBAULL); pi(0); llamar(); }  /* STOP_SCRIPTED_CONVERSATION */
+    for (int k = 0; k < 3; k += 2) {            /* INPUT_CELLPHONE_CANCEL (177) en el siguiente fotograma */
+        sh_init(0xE8A25867FBA3B05EULL); pi(k); pi(177); pf(1.0f); llamar();
+    }
+    if (veces++ < 3) {
+        char t[64];
+        snprintf(t, sizeof t, "llamada colgada (suena=%d hablando=%d)", suena, hablando);
+        apuntar(t);
+        if (veces == 1) apuntar_scripts();
+    }
+}
+
 /* De pie en el punto de salida: congela, espera la colisión y busca el suelo */
 static void a_barcelona(const char *por_que)
 {
@@ -209,6 +235,8 @@ static void a_barcelona(const char *por_que)
     for (int i = 0; i < 1200 && !(hay = suelo(salida_x, salida_y, &z)); i++) {  /* hasta 2 min: el mapa es grande */
         if (i == 50) mover(ped, salida_x, salida_y, 60.0f);  /* más cerca del suelo, para que cargue antes */
         pedir_colision(salida_x, salida_y, 20.0f);
+        parar_hilos(1);
+        colgar();
         sh_wait(100);
     }
     mover(ped, salida_x, salida_y, hay ? z + 1.0f : 60.0f);
@@ -246,7 +274,9 @@ static void principal(void)
         fclose(f);
     }
     while (cargando()) sh_wait(500);
-    sh_wait(3000);
+    /* desde el primer fotograma: "main" relanza comms_controller y en un fotograma ya hace la llamada pendiente
+       (Simeon); antes se esperaban 3 s y luego cada 0,5 s y la llamada se colaba */
+    for (DWORD t0 = GetTickCount(); GetTickCount() - t0 < 3000;) { parar_hilos(1); colgar(); sh_wait(0); }
     apuntar("partida cargada");
     parar_historia(1);
     apagar_ipl();
@@ -266,12 +296,9 @@ static void principal(void)
             a_barcelona(estaba_muerto ? "muerte" : "detencion");
             estaba_muerto = estaba_detenido = 0;
         }
-        if (!listado && GetTickCount() - inicio >= 30000) { listado = 1; apuntar_scripts(); }
-        static DWORD ultimo_hilo;
-        if (GetTickCount() - ultimo_hilo >= 500) {  /* "main" vuelve a lanzar algunos (comms, triggers...) */
-            parar_hilos(1);
-            ultimo_hilo = GetTickCount();
-        }
+        if (!listado && GetTickCount() - inicio >= 12000) { listado = 1; apuntar_scripts(); }
+        colgar();
+        parar_hilos(1);  /* en cada fotograma: "main" vuelve a lanzar algunos (comms, triggers...) */
         if (GetTickCount() - ultimo >= 3000) {
             parar_historia(1);
             static int vuelta;

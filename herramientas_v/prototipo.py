@@ -136,10 +136,21 @@ def separar_muros(v, n, tris, rango=1.8, orto=None):
     t = tris[empinado]
     p = v[t].reshape(-1, 3)
     nn = n[t].reshape(-1, 3)
-    horiz = np.hypot(nn[:, 0], nn[:, 1]) + 1e-9
-    # u a lo largo del muro (perpendicular a su normal horizontal), v en altura
-    dx, dy = -nn[:, 1] / horiz, nn[:, 0] / horiz
-    uv = np.c_[(p[:, 0] * dx + p[:, 1] * dy) / 2.5, p[:, 2] / 2.5]
+    # UV por triángulo en su propio plano (sin deformar): u en horizontal a lo largo del muro, v cuesta arriba.
+    # Antes u iba por la normal de cada vértice (cambiaba dentro del triángulo) y v era la altura: en los
+    # triángulos poco inclinados del talud la textura salía estirada (2200 avisos del revisor)
+    q = p.reshape(-1, 3, 3)
+    cara = np.cross(q[:, 1] - q[:, 0], q[:, 2] - q[:, 0])
+    cara /= np.linalg.norm(cara, axis=1, keepdims=True) + 1e-12
+    t1 = np.c_[-cara[:, 1], cara[:, 0], np.zeros(len(cara))]
+    largo = np.linalg.norm(t1, axis=1, keepdims=True)
+    t1 = np.where(largo > 1e-3, t1 / np.maximum(largo, 1e-12), [1.0, 0.0, 0.0])  # cara llana: cualquiera
+    t2 = np.cross(cara, t1)
+    t2 *= np.where(t2[:, 2:3] < 0, -1.0, 1.0)  # v hacia arriba
+    t1, t2 = np.repeat(t1, 3, 0), np.repeat(t2, 3, 0)
+    # el origen de cada triángulo en múltiplos de 100 m (las UV no pierden precisión ni se cortan dentro)
+    o = np.repeat(np.floor(q[:, 0] / 100.0) * 100.0, 3, 0)
+    uv = np.c_[((p - o) * t1).sum(1) / 2.5, ((p - o) * t2).sum(1) / 2.5]
     if orto is not None:
         lado = CASILLA / 2
         peq = np.asarray(orto.convert("RGB").resize((125, 125), Image.BOX).filter(ImageFilter.GaussianBlur(1.5)),
@@ -451,6 +462,21 @@ def colision_edificios(vols, origen, casilla, mundo):
     return np.array(v) + mundo, np.array(t)
 
 
+def construccion_gigante(p):
+    """Muelles, explanadas y terminales del Port que el Catastro da como construcciones sin plantas (hasta 5 km de
+    largo, tiras de pocos metros): con el LiDAR (grúas, contenedores) salían paredes de cientos de metros que
+    cruzaban el mapa. Ningún edificio sin plantas mide más de 250 m; tampoco hay edificios que sean una tira."""
+    a = p["anillos"][0]
+    lado = float((a.max(0) - a.min(0)).max())
+    if lado <= 250:
+        return False
+    if p["plantas"] == 0:
+        return True
+    b = np.roll(a, -1, 0)
+    relleno = abs(float(np.sum(a[:, 0] * b[:, 1] - b[:, 0] * a[:, 1]))) / 2 / float(np.prod(a.max(0) - a.min(0)))
+    return relleno < 0.01
+
+
 def main():
     global SALIDA
     hoja = sys.argv[1]
@@ -465,6 +491,7 @@ def main():
         partes += d["partes"]
         info.update(d["edificios"])
     partes = [p for p in partes if not monumentos_v.excluido(p["anillos"][0].mean(0))]  # los hace monumentos_v
+    partes = [p for p in partes if not construccion_gigante(p)]
     centros = np.array([p["anillos"][0].mean(0) for p in partes])
     capas["mascara_edif"] = mascara_edificios(partes, centros, e0h, n1h, capas["suelo"].shape[0])
     import costa_v

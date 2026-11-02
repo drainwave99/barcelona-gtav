@@ -320,7 +320,10 @@ def _malla(tris, suelo, sube, escala, centro, tono):
     a, b, c = v[0::3], v[1::3], v[2::3]
     nrm = np.cross(b - a, c - a)
     nrm /= np.linalg.norm(nrm, axis=1, keepdims=True) + 1e-12
-    uv = (xy % 4000.0) / escala  # continua de casilla a casilla
+    # continua de casilla a casilla; el corte cada 4 km (precisión de las UV) por triángulo, con el de su primer
+    # vértice: con xy % 4000 por vértice, los triángulos que cruzaban x = 432000, y = 4592000... se estiraban 4 km
+    base = np.repeat(np.floor(xy[0::3] / 4000.0) * 4000.0, 3, axis=0)
+    uv = (xy - base) / escala
     luz = tono[0] + tono[1] * _ruido(xy[:, 0], xy[:, 1], 1) + tono[2] * _ruido(xy[:, 0], xy[:, 1], 2, 1.7)
     gris = np.clip(luz * 255, 0, 255).astype(int)
     return dict(v=v, n=np.repeat(nrm, 3, 0), uv=uv, color=np.c_[gris, gris, gris, np.full(len(v), 255)],

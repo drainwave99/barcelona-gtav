@@ -221,6 +221,12 @@ def main():
     r = rage.subprocess.run([str(rage.DOTNET), str(rage.CWTOOL), "meter", str(GTA), str(DESTINO), str(raiz)],
                             capture_output=True, text=True)
     print(r.stdout.strip(), r.stderr.strip()[-2000:])
+    # la copia de seguridad puede ser de antes de algún paquete nuestro (bcn2, bcnradar...): vuelven a dlclist.xml
+    for d in sorted((GTA / "mods" / "update" / "x64" / "dlcpacks").glob("bcn*")):
+        if d.name != "bcn" and (d / "dlc.rpf").exists():
+            r = rage.subprocess.run([str(rage.DOTNET), str(rage.CWTOOL), "dlclist", str(GTA), str(DESTINO), d.name],
+                                    capture_output=True, text=True)
+            print(r.stdout.strip(), r.stderr.strip()[-500:])
     lista_ipl()
 
 

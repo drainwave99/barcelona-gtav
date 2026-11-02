@@ -233,30 +233,63 @@ def mobiliario(xml, nombre, hoja):
 HOJAS_POR_PACK = 40  # (las del Eixample pasan de 150 MB) un RPF no puede pasar de 8 GB (desplazamientos de 23 bits en bloques de 512 B)
 
 
+HOJAS_NUEVAS_POR_PACK = 32  # las hojas que se añadan van a paquetes de hasta 32 (bcn ya roza los 4 GB con 40)
+REPARTO = config_v.MOD / "paquetes.json"
+
+
+def reparto(hojas):
+    """{paquete: [hojas]} fijo: cada hoja se queda en su paquete aunque se añadan otras (si no, al añadir una
+    se movían todas y había que rehacer todos los paquetes). Las nuevas llenan el último o abren otro."""
+    import json
+    if REPARTO.exists():
+        rep = json.loads(REPARTO.read_text(encoding="utf-8"))
+    else:  # el reparto de antes (de 40 en 40 en orden); se escribió el 2026-11-02 con las 94 hojas de entonces
+        hechas = sorted(hojas)
+        rep = {("bcn" if k == 0 else f"bcn{k + 1}"): hechas[i:i + HOJAS_POR_PACK]
+               for k, i in enumerate(range(0, len(hechas), HOJAS_POR_PACK))}
+    puestas = {h for v in rep.values() for h in v}
+    for h in sorted(hojas):
+        if h in puestas:
+            continue
+        ultimo = list(rep)[-1] if rep else None
+        if ultimo is None or len(rep[ultimo]) >= (HOJAS_POR_PACK if ultimo == "bcn" else HOJAS_NUEVAS_POR_PACK):
+            ultimo = "bcn" if not rep else f"bcn{len(rep) + 1}"
+            rep[ultimo] = []
+        rep[ultimo].append(h)
+        puestas.add(h)
+    REPARTO.write_text(json.dumps(rep, indent=1), encoding="utf-8")
+    return rep
+
+
 def main():
-    """Las hojas se reparten en paquetes DLC de HOJAS_POR_PACK: bcn, bcn2, bcn3... (cada uno con sus propios
-    diccionarios compartidos). Los paquetes a partir del segundo necesitan su línea en dlclist.xml."""
+    """Las hojas se reparten en paquetes DLC bcn, bcn2, bcn3... (cada uno con sus propios diccionarios
+    compartidos) según mod_v/paquetes.json. Los paquetes a partir del segundo necesitan su línea en dlclist.xml.
+    Con hojas en la línea se rehacen los paquetes que las contienen (enteros); con --cambiadas, todos los que
+    tengan alguna hoja regenerada después de su dlc.rpf."""
     global PACK, OBRA
     cambiadas = "--cambiadas" in sys.argv  # todas las hojas, pero solo se rehacen los paquetes con alguna cambiada
     hojas = sorted(a for a in sys.argv[1:] if not a.startswith("-"))
-    if cambiadas and not hojas:
-        hojas = sorted(h.name for h in (config_v.MOD / "prototipo").iterdir() if h.name.isdigit())
-    trozos = [hojas[i:i + HOJAS_POR_PACK] for i in range(0, len(hojas), HOJAS_POR_PACK)]
+    todas = sorted(h.name for h in (config_v.MOD / "prototipo").iterdir() if h.name.isdigit()
+                   and (config_v.MOD / "prototipo" / h.name / "colocacion.pkl").exists())
+    rep = reparto(todas if cambiadas and not hojas else hojas)
     if not _juego_abierto():  # lo instalado ahora, para poder volver si lo nuevo falla
         import versiones_v
         versiones_v.guardar("antes")
-    for k, trozo in enumerate(trozos):
-        PACK = "bcn" if k == 0 else f"bcn{k + 1}"
-        OBRA = config_v.MOD / ("dlc" if k == 0 else f"dlc_{PACK}")
+    for k, (pack, trozo) in enumerate(rep.items()):
+        if not cambiadas and not set(trozo) & set(hojas):
+            continue
+        PACK = pack
+        OBRA = config_v.MOD / ("dlc" if pack == "bcn" else f"dlc_{pack}")
         if cambiadas and not _paquete_viejo(trozo):
             print(f"{PACK}: sin cambios ({trozo[0]}..{trozo[-1]})", flush=True)
             continue
         empaquetar(trozo)
-        if k and not _juego_abierto():
+        (OBRA / "hojas.txt").write_text(" ".join(trozo), encoding="utf-8")
+        if pack != "bcn" and not _juego_abierto():
             r = rage.subprocess.run([str(rage.DOTNET), str(rage.CWTOOL), "dlclist", str(GTA),
                                      str(GTA / "mods" / "update" / "update.rpf"), PACK], capture_output=True, text=True)
             print(r.stdout.strip(), r.stderr.strip())
-    print(f"PAQUETES: {len(trozos)}")
+    print(f"PAQUETES: {len(rep)}")
 
 
 def _paquete_viejo(trozo):
@@ -264,6 +297,9 @@ def _paquete_viejo(trozo):
     no hay dlc.rpf. Los ymap/ytyp que escribe el propio empaquetado no cuentan."""
     hecho = OBRA / "dlc.rpf"
     if not hecho.exists():
+        return True
+    lista = OBRA / "hojas.txt"  # hecho con otras hojas
+    if lista.exists() and lista.read_text(encoding="utf-8").split() != list(trozo):
         return True
     t = hecho.stat().st_mtime
     for hoja in trozo:
