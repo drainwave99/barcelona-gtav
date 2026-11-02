@@ -216,12 +216,14 @@ static void salir_por(int ped, int b)
     float z = bo->z;
     congelar(ped, 1);
     mover(ped, bo->x, bo->y, z + 1.0f);
-    for (int i = 0; i < 60; i++) {
+    int hay = 0;
+    for (int i = 0; i < 300; i++) {   /* hasta 15 s: sin suelo cargado se caeria al vacio */
         pedir_colision(bo->x, bo->y, z);
         float zs;
-        if (suelo(bo->x, bo->y, &zs) && fabsf(zs - z) < 6.0f) { z = zs; break; }
+        if (suelo(bo->x, bo->y, &zs) && fabsf(zs - z) < 6.0f) { z = zs; hay = 1; break; }
         sh_wait(50);
     }
+    if (!hay) apuntar("sin suelo en la boca");
     mover(ped, bo->x, bo->y, z + 0.1f);
     rumbo_poner(ped, bo->rumbo);
     congelar(ped, 0);
