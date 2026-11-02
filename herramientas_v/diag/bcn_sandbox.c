@@ -210,13 +210,24 @@ static void colgar(void)
     int suena = (int)(*llamar() & 1);
     sh_init(0x7497D2CE2C30D24CULL);           /* IS_MOBILE_PHONE_CALL_ONGOING */
     int hablando = (int)(*llamar() & 1);
-    if (!suena && !hablando) return;
+    static DWORD desde;
+    if (!suena && !hablando) { desde = 0; return; }
+    if (!desde) desde = GetTickCount();
     if (suena) { sh_init(0x6C5AE23EFA885092ULL); pi(ped); llamar(); }  /* STOP_PED_RINGTONE */
     if (hablando) { sh_init(0xD79DEEFB53455EBAULL); pi(0); llamar(); }  /* STOP_SCRIPTED_CONVERSATION */
-    for (int k = 0; k < 3; k += 2) {            /* INPUT_CELLPHONE_CANCEL (177) en el siguiente fotograma */
+    for (int k = 0; k < 3; k += 2) {
+        /* INPUT_CELLPHONE_CANCEL (177): _SET_CONTROL_NORMAL solo vale con el control desactivado antes
+           (sin esto no colgaba nunca y el móvil se quedaba en "llamada entrante") */
+        sh_init(0xFE99B66D079CF6BCULL); pi(k); pi(177); pi(1); llamar();  /* DISABLE_CONTROL_ACTION */
         sh_init(0xE8A25867FBA3B05EULL); pi(k); pi(177); pf(1.0f); llamar();
     }
-    if (veces++ < 3) {
+    if (GetTickCount() - desde > 2000) {  /* sigue sonando: fuera el móvil (el juego lo vuelve a lanzar luego) */
+        sh_init(0x3BC861DF703E5097ULL); llamar();  /* DESTROY_MOBILE_PHONE */
+        parar("cellphone_controller");
+        desde = GetTickCount();
+        apuntar("llamada: movil cerrado");
+    }
+    if (veces++ < 3 || veces % 200 == 0) {
         char t[64];
         snprintf(t, sizeof t, "llamada colgada (suena=%d hablando=%d)", suena, hablando);
         apuntar(t);

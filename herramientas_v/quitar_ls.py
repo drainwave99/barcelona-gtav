@@ -18,6 +18,7 @@ se restaura antes desde la copia de seguridad: así se puede volver a ejecutar s
 
 Deshacer: python quitar_ls.py --deshacer   (vuelve a poner la copia de seguridad de update.rpf)
 """
+import pickle
 import re
 import shutil
 import sys
@@ -98,13 +99,72 @@ QUAD = """  <Item>
    <Type value="0" />
    <IsInvisible value="false" />
    <HasLimitedDepth value="false" />
-   <z value="0.000000" />
+   <z value="{z:.6f}" />
    <a1 value="26" />
    <a2 value="26" />
    <a3 value="26" />
    <a4 value="26" />
    <NoStencil value="false" />
   </Item>"""
+
+
+RIO_ESCALON = 0.25  # m
+RIO_SOBRE = 0.35    # m de agua sobre el suelo del LiDAR en el cauce
+
+
+def _rectangulos(mascara):
+    """Rectángulos (i0, i1, j0, j1) que cubren la máscara: tramos de cada fila; las filas con el mismo tramo se juntan."""
+    import numpy as np
+    filas = np.flatnonzero(mascara.any(1))
+    if not len(filas):
+        return []
+    rect, abiertos = [], {}
+    for j in range(filas[0], filas[-1] + 2):
+        nuevos = {}
+        if j < mascara.shape[0]:
+            d = np.diff(np.r_[0, mascara[j].astype(np.int8), 0])
+            for a, b in zip(np.where(d == 1)[0], np.where(d == -1)[0]):
+                nuevos[(a, b)] = abiertos.pop((a, b), j)
+        rect += [(a, b, j0, j) for (a, b), j0 in abiertos.items()]
+        abiertos = nuevos
+    return rect
+
+
+def _rios(E, N, hojas, donde):
+    """Celdas de río (datos_v/rios.pkl, de rios_v.py) dentro de 'donde' y la altura del agua en cada una: suelo del
+    LiDAR, mediana de las celdas de río a menos de 80 m (alisa los saltos), + RIO_SOBRE, en escalones."""
+    import numpy as np
+    import shapely
+    from scipy import ndimage
+    from trafico_v import Alturas
+    f = config_v.DATOS / "rios.pkl"
+    vacio = np.zeros(E.shape, bool), np.zeros(E.shape, np.float32)
+    if not f.exists():
+        return vacio
+    with open(f, "rb") as fh:
+        polis = [p for p in pickle.load(fh) if p.area > 5000]
+    if not polis:
+        return vacio
+    union = shapely.union_all(polis)
+    shapely.prepare(union)
+    b = union.bounds
+    caja = (E > b[0]) & (E < b[2]) & (N > b[1]) & (N < b[3]) & donde
+    rio = np.zeros(E.shape, bool)
+    rio[caja] = shapely.contains_xy(union, E[caja], N[caja])
+    alt = Alturas(hojas)
+    z = np.full(E.shape, np.nan, np.float32)
+    for j, i in zip(*np.nonzero(rio)):
+        v = alt.z(E[j, i], N[j, i], False)
+        if v is not None:
+            z[j, i] = v
+    rio &= np.isfinite(z)
+    if not rio.any():
+        return vacio
+    js, is_ = np.nonzero(rio)
+    j0, j1, i0, i1 = js.min(), js.max() + 1, is_.min(), is_.max() + 1
+    z[j0:j1, i0:i1] = ndimage.generic_filter(z[j0:j1, i0:i1], np.nanmedian, size=9, mode="constant", cval=np.nan)
+    z = np.round((z + RIO_SOBRE) / RIO_ESCALON) * RIO_ESCALON
+    return rio, z
 
 
 def agua():
@@ -126,18 +186,15 @@ def agua():
         e0, n0 = int(h[:3]) * 1000, (4000 + int(h[3:])) * 1000
         cubierto |= (E >= e0) & (E < e0 + 1000) & (N >= n0) & (N < n0 + 1000)
     hay |= ~cubierto
-    rect, abiertos = [], {}
-    for j in range(hay.shape[0] + 1):
-        nuevos = {}
-        if j < hay.shape[0]:
-            d = np.diff(np.r_[0, hay[j].astype(np.int8), 0])
-            for a, b in zip(np.where(d == 1)[0], np.where(d == -1)[0]):
-                nuevos[(a, b)] = abiertos.pop((a, b), j)
-        rect += [(a, b, j0, j) for (a, b), j0 in abiertos.items()]
-        abiertos = nuevos
+    rect = [(*r, 0.0) for r in _rectangulos(hay)]
+    # ríos (el Besòs): agua a la altura del cauce, en escalones de RIO_ESCALON m (el agua del juego es plana)
+    rio, z_rio = _rios(E, N, hojas, cubierto & ~hay)
+    for nivel in np.unique(z_rio[rio]):
+        rect += [(*r, float(nivel)) for r in _rectangulos(rio & (z_rio == nivel))]
     x = lambda i: -AGUA_LADO + i * AGUA_PASO
-    items = "\n".join(QUAD.format(x0=x(a), x1=x(b), y0=x(j0), y1=x(j1)) for a, b, j0, j1 in rect)
-    print(f"water.xml: {len(rect)} rectángulos de agua, {hay.mean() * 100:.0f} % de la zona")
+    items = "\n".join(QUAD.format(x0=x(a), x1=x(b), y0=x(j0), y1=x(j1), z=z) for a, b, j0, j1, z in rect)
+    print(f"water.xml: {len(rect)} rectángulos de agua, {hay.mean() * 100:.0f} % de la zona, "
+          f"ríos {rio.sum() * AGUA_PASO ** 2 / 1e4:.0f} ha")
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <WaterData>
  <WaterQuads>

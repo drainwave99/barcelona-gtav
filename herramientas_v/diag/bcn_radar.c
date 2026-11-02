@@ -308,6 +308,16 @@ static void dibujar_radar(int ped)
     while (C * S * 1080.0f < 8.0f && C < 128) C *= 2;
 
     if (!mapa_listo) return;
+    /* los bloques de alrededor se piden antes de que entren en el marco */
+    {
+        int pbx = (int)floorf((px - X0) / BLOQUE), pby = (int)floorf((py - Y0) / BLOQUE);
+        for (int i = -1; i <= 1; i++)
+            for (int j = -1; j <= 1; j++) {
+                float ex = px + i * 700.0f, ey = py + j * 700.0f;   /* los que están a menos de 700 m */
+                int qx = (int)floorf((ex - X0) / BLOQUE), qy = (int)floorf((ey - Y0) / BLOQUE);
+                if (qx != pbx || qy != pby || (i == 0 && j == 0)) bloque_listo(qx, qy);
+            }
+    }
     orden(1);
     sprite("bcnradar_mapa", "mar", cx, cy, W / a, H, 0, 235);
     /* zona del mundo que cae en el marco (caja del rectángulo girado) */
@@ -324,8 +334,17 @@ static void dibujar_radar(int ped)
                 sy < (cy - H / 2) - mitad || sy > (cy + H / 2) + mitad)
                 continue;
             int bx = (int)floorf((gx - X0) / BLOQUE), by = (int)floorf((gy - Y0) / BLOQUE);
-            if (!bloque_listo(bx, by)) continue;
             float bx0 = X0 + bx * BLOQUE, by0 = Y0 + by * BLOQUE;
+            if (!bloque_listo(bx, by)) {
+                /* aún no ha llegado el bloque fino: el plano general (siempre cargado), no el azul del mar */
+                if (bx < 0 || by < 0 || bx >= NBX || by >= NBY || !hay[bx][by]) continue;
+                char t[24];
+                sprintf(t, "m_%d_%d", bx, by);
+                float u1 = (gx - bx0) / BLOQUE, v1 = 1.0f - (gy + C - by0) / BLOQUE;
+                sprite_uv("bcnradar_mapa", t, sx / a, sy, (lado * 1.04f) / a, lado * 1.04f, u1, v1,
+                          u1 + C / BLOQUE, v1 + C / BLOQUE, h * 180.0f / 3.14159265f, 255);
+                continue;
+            }
             int i = (int)floorf((gx - bx0) / TESELA), j = (int)floorf((gy - by0) / TESELA);
             float tx0 = bx0 + i * TESELA, ty0 = by0 + j * TESELA;
             char d[32], t[8];
