@@ -8,6 +8,9 @@ mods del juego (la que lee OpenIV.asi; los archivos originales no se tocan).
 La entrada dlcpacks:/bcn/ de dlclist.xml la pone 'cwtool dlclist' en mods/update/update.rpf.
 
 Uso: python empaquetar_v.py 434589 435587
+     python empaquetar_v.py --cambiadas    todas las hojas, pero solo rehace los paquetes (bcn, bcn2...) con alguna
+                                           hoja regenerada después de su dlc.rpf (un arreglo: ~25-80 min, no 4 h)
+Después de empaquetar, con el juego cerrado: python quitar_ls.py (vuelve a poner la lista de IPL al día).
 """
 import pickle
 import shutil
@@ -234,7 +237,10 @@ def main():
     """Las hojas se reparten en paquetes DLC de HOJAS_POR_PACK: bcn, bcn2, bcn3... (cada uno con sus propios
     diccionarios compartidos). Los paquetes a partir del segundo necesitan su línea en dlclist.xml."""
     global PACK, OBRA
-    hojas = sorted(sys.argv[1:])
+    cambiadas = "--cambiadas" in sys.argv  # todas las hojas, pero solo se rehacen los paquetes con alguna cambiada
+    hojas = sorted(a for a in sys.argv[1:] if not a.startswith("-"))
+    if cambiadas and not hojas:
+        hojas = sorted(h.name for h in (config_v.MOD / "prototipo").iterdir() if h.name.isdigit())
     trozos = [hojas[i:i + HOJAS_POR_PACK] for i in range(0, len(hojas), HOJAS_POR_PACK)]
     if not _juego_abierto():  # lo instalado ahora, para poder volver si lo nuevo falla
         import versiones_v
@@ -242,12 +248,33 @@ def main():
     for k, trozo in enumerate(trozos):
         PACK = "bcn" if k == 0 else f"bcn{k + 1}"
         OBRA = config_v.MOD / ("dlc" if k == 0 else f"dlc_{PACK}")
+        if cambiadas and not _paquete_viejo(trozo):
+            print(f"{PACK}: sin cambios ({trozo[0]}..{trozo[-1]})", flush=True)
+            continue
         empaquetar(trozo)
         if k and not _juego_abierto():
             r = rage.subprocess.run([str(rage.DOTNET), str(rage.CWTOOL), "dlclist", str(GTA),
                                      str(GTA / "mods" / "update" / "update.rpf"), PACK], capture_output=True, text=True)
             print(r.stdout.strip(), r.stderr.strip())
     print(f"PAQUETES: {len(trozos)}")
+
+
+def _paquete_viejo(trozo):
+    """True si alguna hoja del paquete (su colocacion.pkl o sus modelos) es más nueva que el dlc.rpf hecho, o si
+    no hay dlc.rpf. Los ymap/ytyp que escribe el propio empaquetado no cuentan."""
+    hecho = OBRA / "dlc.rpf"
+    if not hecho.exists():
+        return True
+    t = hecho.stat().st_mtime
+    for hoja in trozo:
+        base = config_v.MOD / "prototipo" / hoja
+        if (base / "colocacion.pkl").stat().st_mtime > t:
+            return True
+        for f in (base / "xml").iterdir():
+            if not f.name.startswith("bcn") or f.name.startswith("bcn_"):  # modelos y texturas (no bcn2_<hoja>.ymap...)
+                if f.stat().st_mtime > t:
+                    return True
+    return False
 
 
 def _juego_abierto():
