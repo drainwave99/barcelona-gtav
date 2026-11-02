@@ -7,7 +7,7 @@ se restaura antes desde la copia de seguridad: así se puede volver a ejecutar s
 
   mods/update/update.rpf/common/data/levels/gta5/images.meta   sin RPF del mapa
   mods/update/update.rpf/common/data/levels/gta5/gta5.meta     sin sus ityp permanentes, luces lejanas, zonas...
-  mods/update/update.rpf/common/data/levels/gta5/popzone.ipl   sin zonas de población (gente de Los Santos)
+  mods/update/update.rpf/common/data/levels/gta5/popzone.ipl   una sola zona (Downt) sobre todo el mapa
   mods/update/update.rpf/x64/levels/gta5/sp_manifest.ymt       sin puntos de escenario
   mods/update/update.rpf/dlc_patch/<pack>/content.xml          parches y DLC sin sus RPF del mapa
   mods/update/update.rpf/common/data/levels/gta5/water.xml     el mar de Barcelona (costa real) y agua donde no
@@ -38,7 +38,9 @@ MAPA = re.compile(r"levels/gta5/(?:_citye|_cityw|_hills)/|levels/gta5/(?:navmesh
 # entradas de gta5.meta que dependen del mapa
 META = re.compile(r"_citye/|_cityw/|_hills/|distantlights|slownesszones|mapzones\.xml|heightmap\.dat"
                   r"|waterheight\.dat|vfxfogvolumeinfo", re.I)
-POPZONE = "zone\nend\n"
+# una zona de población sobre todo el mapa con la gente y los coches del centro de Los Santos (Downt): con el
+# popzone vacío no salía tráfico por los caminos de trafico_v
+POPZONE = "zone\nZ_BCN, -8192.0, -8192.0, -300.0, 8192.0, 8192.0, 1500.0, Downt, 0\nend\n"
 SP_MANIFEST = """<?xml version="1.0" encoding="UTF-8"?>
 <CScenarioPointManifest>
   <VersionNumber value="0" />

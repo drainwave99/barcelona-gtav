@@ -96,8 +96,19 @@ static int control_ya(int c) { sh_init(0x91AEF906BCA88877ULL); pi(0); pi(c); ret
 static int control(int c) { sh_init(0xE2587F8CBBD87B1DULL); pi(0); pi(c); return (int)(*llamar() & 1); }
 static float control_valor(int c) { sh_init(0x11E65974A982637CULL); pi(0); pi(c); return rf(llamar(), 0); }
 static void cursor_visible(void) { sh_init(0xAAE7CE1D63167423ULL); llamar(); }
+static void texto_a(const char *s, float x, float y, float escala, int just);
 static void texto(const char *s, float x, float y, float escala, int centrado)
 {
+    texto_a(s, x, y, escala, centrado ? 0 : 1);
+}
+/* just: 0 centrado, 1 izquierda, 2 derecha (x es el borde derecho) */
+static void texto_a(const char *s, float x, float y, float escala, int just)
+{
+    if (just == 2) {
+        sh_init(0x4E096588B13FFECAULL); pi(2); llamar();                  /* SET_TEXT_JUSTIFICATION */
+        sh_init(0x63145D9C883A1A70ULL); pf(0.0f); pf(x); llamar();       /* SET_TEXT_WRAP */
+    }
+    int centrado = just == 0;
     sh_init(0x66E0276CC5F6B9DAULL); pi(4); llamar();                      /* SET_TEXT_FONT */
     sh_init(0x07C837F9A01C34C9ULL); pf(escala); pf(escala); llamar();   /* SET_TEXT_SCALE */
     sh_init(0xBE6B23FFA53FB442ULL); pi(255); pi(255); pi(255); pi(255); llamar(); /* SET_TEXT_COLOUR */
@@ -170,6 +181,106 @@ static void soltar_viejos(void)
 #define MAR_R 38
 #define MAR_G 64
 #define MAR_B 90
+
+/* ---- nombre de la calle (bcn_calles.bin, de radar_v.py) ---- */
+static char **nombres;
+static int n_nombres, n_tramos, m_ancho, m_alto;
+static float *tramo;       /* x0 y0 x1 y1 */
+static int *tramo_nom, *muni;
+static float m_x0, m_y0, m_paso;
+#define CELDA_C 64.0f
+static int c_ancho, c_alto, *c_ini, *c_lista;
+
+static void leer_calles(void)
+{
+    FILE *f = fopen("bcn_calles.bin", "rb");
+    if (!f) { apuntar("falta bcn_calles.bin"); return; }
+    fseek(f, 0, SEEK_END);
+    long t = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *b = malloc(t);
+    if (!b || fread(b, 1, t, f) != (size_t)t || memcmp(b, "BCNC", 4)) { fclose(f); return; }
+    fclose(f);
+    memcpy(&n_nombres, b + 4, 4); memcpy(&n_tramos, b + 8, 4);
+    memcpy(&m_x0, b + 12, 4); memcpy(&m_y0, b + 16, 4); memcpy(&m_paso, b + 20, 4);
+    memcpy(&m_ancho, b + 24, 4); memcpy(&m_alto, b + 28, 4);
+    char *p = b + 32;
+    nombres = malloc(sizeof(char *) * n_nombres);
+    for (int i = 0; i < n_nombres; i++) { nombres[i] = p; p += strlen(p) + 1; }
+    tramo = (float *)p; p += 16L * n_tramos;
+    tramo_nom = (int *)p; p += 4L * n_tramos;
+    muni = (int *)p;
+    /* índice: tramos de cada cuadro de 64 m (por su caja) */
+    c_ancho = (int)(m_ancho * m_paso / CELDA_C) + 1; c_alto = (int)(m_alto * m_paso / CELDA_C) + 1;
+    int nc = c_ancho * c_alto;
+    c_ini = calloc(nc + 1, sizeof(int));
+    for (int pasada = 0; pasada < 2; pasada++) {
+        int *lleno = pasada ? calloc(nc, sizeof(int)) : NULL;
+        for (int k = 0; k < n_tramos; k++) {
+            float *q = tramo + 4 * k;
+            int i0 = (int)((fminf(q[0], q[2]) - m_x0) / CELDA_C), i1 = (int)((fmaxf(q[0], q[2]) - m_x0) / CELDA_C);
+            int j0 = (int)((fminf(q[1], q[3]) - m_y0) / CELDA_C), j1 = (int)((fmaxf(q[1], q[3]) - m_y0) / CELDA_C);
+            for (int i = i0 < 0 ? 0 : i0; i <= i1 && i < c_ancho; i++)
+                for (int j = j0 < 0 ? 0 : j0; j <= j1 && j < c_alto; j++) {
+                    int c = j * c_ancho + i;
+                    if (!pasada) c_ini[c + 1]++;
+                    else c_lista[c_ini[c] + lleno[c]++] = k;
+                }
+        }
+        if (!pasada) {
+            for (int c = 0; c < nc; c++) c_ini[c + 1] += c_ini[c];
+            c_lista = malloc(sizeof(int) * (c_ini[nc] + 1));
+        } else free(lleno);
+    }
+    char m[80];
+    snprintf(m, sizeof m, "calles: %d nombres, %d tramos", n_nombres, n_tramos);
+    apuntar(m);
+}
+
+/* nombre de la calle más cercana (a menos de 30 m) y del municipio */
+static const char *calle_en(float x, float y, const char **mun)
+{
+    *mun = NULL;
+    if (!tramo) return NULL;
+    int mi = (int)((x - m_x0) / m_paso), mj = (int)((y - m_y0) / m_paso);
+    if (mi >= 0 && mj >= 0 && mi < m_ancho && mj < m_alto) {
+        int k = muni[mj * m_ancho + mi];
+        if (k >= 0 && k < n_nombres) *mun = nombres[k];
+    }
+    int ci = (int)((x - m_x0) / CELDA_C), cj = (int)((y - m_y0) / CELDA_C);
+    float mejor = 30.0f * 30.0f;
+    int cual = -1;
+    for (int i = ci - 1; i <= ci + 1; i++)
+        for (int j = cj - 1; j <= cj + 1; j++) {
+            if (i < 0 || j < 0 || i >= c_ancho || j >= c_alto) continue;
+            int c = j * c_ancho + i;
+            for (int l = c_ini[c]; l < c_ini[c + 1]; l++) {
+                float *q = tramo + 4 * c_lista[l];
+                float dx = q[2] - q[0], dy = q[3] - q[1], L = dx * dx + dy * dy;
+                float u = L > 0 ? ((x - q[0]) * dx + (y - q[1]) * dy) / L : 0;
+                u = u < 0 ? 0 : u > 1 ? 1 : u;
+                float ex = q[0] + u * dx - x, ey = q[1] + u * dy - y, d = ex * ex + ey * ey;
+                if (tramo_nom[c_lista[l]] & 0x40000000) { d = sqrtf(d) + 15.0f; d *= d; }  /* puente: arriba */
+                if (d < mejor) { mejor = d; cual = c_lista[l]; }
+            }
+        }
+    return cual >= 0 ? nombres[tramo_nom[cual] & 0x3FFFFFFF] : NULL;
+}
+
+static void dibujar_calle(int ped)
+{
+    static DWORD ultimo;
+    static const char *calle, *mun;
+    if (GetTickCount() - ultimo > 300) {
+        float x, y, z;
+        coords(ped, &x, &y, &z);
+        calle = calle_en(x, y, &mun);
+        ultimo = GetTickCount();
+    }
+    orden(4);
+    if (calle) texto_a(calle, 0.985f, 0.895f, 0.55f, 2);
+    if (mun) texto_a(mun, 0.985f, 0.935f, 0.40f, 2);
+}
 
 /* ---- radar ---- */
 static float zoom_suave = 240.0f;   /* metros de alto que se ven */
@@ -400,6 +511,7 @@ static void principal(void)
 {
     apuntar("bcn_radar en marcha");
     leer_rejilla();
+    leer_calles();
     DWORD ultimo_soltar = GetTickCount();
     int avisado = 0;
     /* prueba sin nadie delante: con bcn_radar_auto.txt abre el mapa solo y hace capturas de Steam (F12) */
@@ -445,7 +557,7 @@ static void principal(void)
         }
         mostrar_radar(0);
         if (mapa_abierto) dibujar_mapa(ped);
-        else if (libre && !hud_oculto()) dibujar_radar(ped);
+        else if (libre && !hud_oculto()) { dibujar_radar(ped); dibujar_calle(ped); }
         if (GetTickCount() - ultimo_soltar > 5000) { soltar_viejos(); ultimo_soltar = GetTickCount(); }
     }
 }

@@ -5,7 +5,10 @@ Santos) y abre el mapa grande con la tecla M.
   bcnradar_<bx>_<by>.ytd   un bloque de 2048 m: 4 x 4 texturas t<i><j> de 512 m (256 px, 2 m/px)
   bcnradar_mapa.ytd        el plano entero: m_<bx>_<by> de 2048 m (256 px, 8 m/px), la flecha del jugador
   bcn_radar.txt            (carpeta del juego) la rejilla y los bloques que existen, para el plugin
+  bcn_calles.bin           (carpeta del juego) tramos de calle con nombre (OSM) y el municipio de cada cuadro
+                           de 100 m (Catastro), para el nombre de la calle bajo el radar
 
+También lleva los caminos de coches (nodes<N>.ynd, trafico_v.py) para el tráfico.
 Se empaqueta como el DLC 'bcnradar' (mods/update/x64/dlcpacks/bcnradar), aparte de los del mapa: rehacerlo no
 toca bcn, bcn2, bcn3.
 Uso: python radar_v.py [--sin-instalar]   (con el juego cerrado para instalar)
@@ -64,6 +67,61 @@ VIAS = {"rail", "subway", "tram", "narrow_gauge", "light_rail", "funicular"}
 
 def _tiene(tags, claves):
     return any((k, tags.get(k)) in claves for k, _ in claves)
+
+
+def calles_y_municipios(osm, hojas):
+    """bcn_calles.bin: 'BCNC', n nombres, n tramos, rejilla de municipios (x0, y0, paso, ancho, alto); nombres
+    en UTF-8 con 0 al final; tramos float32 x0 y0 x1 y1 + int32 nombre (bit 30: puente, cuenta 15 m más lejos); rejilla uint8 (0 nada, k municipio k)."""
+    import struct
+    nombres, idx, tramos = [], {}, []
+    for v in osm["vias"]:
+        t = v["tags"]
+        nom = t.get("name:ca") or t.get("name")
+        if t.get("highway") not in ANCHOS or not nom or len(v["xy"]) < 2:
+            continue
+        if t.get("tunnel") not in (None, "no"):  # el túnel va por debajo: en la calle de arriba no se nombra
+            continue
+        puente = t.get("bridge") not in (None, "no")
+        if nom not in idx:
+            idx[nom] = len(nombres)
+            nombres.append(nom)
+        c = _a_juego(v["xy"])
+        for a, b in zip(c[:-1], c[1:]):
+            tramos.append((*a, *b, idx[nom] | (0x40000000 if puente else 0)))  # bit 30: puente
+    tramos = [t for t in tramos if X0 <= t[0] < X0 + NBX * BLOQUE and Y0 <= t[1] < Y0 + NBY * BLOQUE]
+    # municipio de cada cuadro de 100 m: el de más edificios del Catastro dentro
+    paso, ancho, alto = 100.0, int(NBX * BLOQUE / 100), int(NBY * BLOQUE / 100)
+    cuenta = np.zeros((len(config_v.MUNICIPIOS) + 1, alto, ancho), np.int32)
+    munis = list(config_v.MUNICIPIOS)
+    for k, muni in enumerate(munis, 1):
+        f = config_v.DATOS / "catastro" / f"{muni}.pkl"
+        if not f.exists():
+            continue
+        with open(f, "rb") as fh:
+            c = np.array([p["anillos"][0].mean(0) for p in pickle.load(fh)["partes"]])
+        g = _a_juego(c)
+        i = ((g[:, 0] - X0) // paso).astype(int)
+        j = ((g[:, 1] - Y0) // paso).astype(int)
+        ok = (i >= 0) & (i < ancho) & (j >= 0) & (j < alto)
+        np.add.at(cuenta[k], (j[ok], i[ok]), 1)
+    rej = cuenta.argmax(0).astype(np.uint8)
+    # los cuadros sin edificios (parques, calles anchas) toman el del vecino más cercano con edificios
+    from scipy import ndimage
+    vacio = rej == 0
+    if vacio.any() and (~vacio).any():
+        _, (jj, ii) = ndimage.distance_transform_edt(vacio, return_indices=True)
+        cerca = ndimage.distance_transform_edt(vacio) <= 10
+        rej = np.where(vacio & cerca, rej[jj, ii], rej)
+    datos = [b"BCNC", struct.pack("<iifffii", len(nombres) + len(munis), len(tramos), X0, Y0, paso, ancho, alto)]
+    for n in nombres + [config_v.MUNICIPIOS[m] for m in munis]:
+        datos.append(n.encode("utf-8") + bytes(1))
+    datos.append(np.array([t[:4] for t in tramos], np.float32).tobytes())
+    datos.append(np.array([t[4] for t in tramos], np.int32).tobytes())
+    # la rejilla apunta a los nombres de municipio (tras los de calles); 0 = nada
+    m = np.where(rej > 0, rej.astype(np.int32) - 1 + len(nombres), -1).astype(np.int32)
+    datos.append(m.tobytes())  # fila 0 = sur
+    (OBRA / "bcn_calles.bin").write_bytes(b"".join(datos))
+    print(f"bcn_calles.bin: {len(nombres)} calles, {len(tramos)} tramos")
 
 
 def cargar():
@@ -250,6 +308,10 @@ def main():
     vista.save(OBRA / "plano.png")
     info = [f"{X0:.0f} {Y0:.0f} {BLOQUE:.0f} {TESELA:.0f} {NBX} {NBY}"] + [f"{bx} {by}" for bx, by in bloques]
     (OBRA / "bcn_radar.txt").write_text("\n".join(info) + "\n", encoding="utf-8")
+    calles_y_municipios(osm, hojas)
+    if config_v.os.environ.get("BCN_TRAFICO", "1") != "0":  # BCN_TRAFICO=0: sin caminos de coches
+        import trafico_v  # los caminos de coches van en el mismo DLC
+        trafico_v.escribir(xml, osm, hojas)
     empaquetar(xml)
 
 
@@ -297,6 +359,7 @@ def empaquetar(xml):
     destino.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(archivo, destino)
     shutil.copy2(OBRA / "bcn_radar.txt", gta / "bcn_radar.txt")
+    shutil.copy2(OBRA / "bcn_calles.bin", gta / "bcn_calles.bin")
     r = rage.subprocess.run([str(rage.DOTNET), str(rage.CWTOOL), "dlclist", str(gta),
                              str(gta / "mods" / "update" / "update.rpf"), PACK], capture_output=True, text=True)
     print(r.stdout.strip(), r.stderr.strip())
