@@ -97,8 +97,13 @@ def bajo_puentes(img, capas, e0h, n1h, e0, n0):
 _MURO = []
 
 
-def textura_muro():
-    """Muro de contención de hormigón (2,5 m por repetición), con juntas de encofrado y manchas de agua."""
+def textura_muro(tinte=None):
+    """Muro de contención de hormigón (2,5 m por repetición), con juntas de encofrado y manchas de agua.
+    'tinte' (r, g, b): color medio de la ortofoto de la casilla. El shader default no tiñe con el color de
+    vértice, y sin esto las cuestas de Montjuïc salían a cuadros crema."""
+    if tinte is not None:
+        a = np.asarray(textura_muro(), np.float32) / 222.0 * np.asarray(tinte, np.float32)
+        return Image.fromarray(np.clip(a, 0, 255).astype(np.uint8))
     if not _MURO:
         r = np.random.default_rng(5)
         # claro y casi gris: se tiñe con el color de la ortofoto de alrededor (separar_muros)
@@ -114,7 +119,13 @@ def textura_muro():
     return _MURO[0]
 
 
-def separar_muros(v, n, tris, rango=1.8, orto=None):
+def tinte_muro(orto):
+    """Color de la pared: el medio de la ortofoto de la casilla, algo más oscuro."""
+    m = np.asarray(orto.convert("RGB").resize((32, 32), Image.BOX), np.float32).reshape(-1, 3).mean(0)
+    return np.clip(m * 0.85, 30, 255)
+
+
+def separar_muros(v, n, tris, rango=3.0, orto=None):
     """Triángulos del terreno casi verticales (suben más de 'rango' m en 2 m: muros de contención,
     taludes de la C-31): la ortofoto se estiraba en ellos. Se devuelven aparte, con UV vertical para la
     textura de muro. -> (índices llanos, geometría de muro o None).
@@ -544,7 +555,7 @@ def main():
             img_orto = bajo_puentes(mosaico(e0, n0, CASILLA, PX_SUELO), capas, e0h, n1h, e0, n0)
             rage.escribir_ytd(xml / f"{orto}.ytd.xml",
                               {orto: (img_orto, False),
-                               "bcn_muro": (textura_muro(), False)})
+                               "bcn_muro": (textura_muro(tinte_muro(img_orto)), False)})
             v, n, uv, tris = terreno(capas, e0h, n1h, e0, n0)
             # túneles: fuera el terreno que se mete en el tubo (la pared de la boca)
             cerca_t = [t for t in tuneles if t["pts"][:, 0].max() >= e0 - 10 and t["pts"][:, 0].min() < e0 + CASILLA + 10
