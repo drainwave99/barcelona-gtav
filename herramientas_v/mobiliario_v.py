@@ -41,6 +41,7 @@ PROPS = {
     "jacaranda": ["prop_tree_jacada_01", "prop_tree_jacada_02"],
 }
 ALTURA_PROP = {"palmera": 9.0, "pino": 14.0, "cipres": 11.0, "frondoso": 13.0, "jacaranda": 12.0}
+CIUDAD_QUEDAN = 3  # de cada 10 árboles en la ciudad (con los parques de dentro sale ~60 % menos)
 DIST = {"arbol": 350.0, "farola": 250.0, "semaforo": 200.0, "otro": 120.0}
 SUBE_ACERA = 0.13  # como la acera de calles_v
 
@@ -160,6 +161,15 @@ def construir(osm, capas, e0h, n1h):
         dx, dy = objetivo[0] - x, objetivo[1] - y
         return float(np.degrees(np.arctan2(-dx, dy)))
 
+    # en la ciudad solo CIUDAD_QUEDAN de cada 10 árboles (había muchos más que en la realidad); en la montaña y
+    # los parques sin edificios alrededor, todos. Ciudad: más del 10 % de suelo edificado en 150 m.
+    urbano = ndimage.uniform_filter(np.isfinite(edif).astype(np.float32), size=301, mode="nearest") > 0.10
+
+    def sobra(x, y, semilla):
+        fi = int(np.clip((n1h - y) / 0.5, 0, urbano.shape[0] - 1))
+        ci = int(np.clip((x - e0h) / 0.5, 0, urbano.shape[1] - 1))
+        return urbano[fi, ci] and (semilla >> 9) % 10 >= CIUDAD_QUEDAN
+
     # árboles de OSM
     puestos = []
     for nd in osm["nodos"]:
@@ -173,9 +183,11 @@ def construir(osm, capas, e0h, n1h):
                 h = 6.0
             tipo = _tipo_arbol(t)
             semilla = zlib.crc32(f"{x:.1f},{y:.1f}".encode())
+            puestos.append((x, y))  # aunque se quite: el LiDAR no debe volver a ponerlo
+            if sobra(x, y, semilla):
+                continue
             escala = float(np.clip(h / ALTURA_PROP[tipo], 0.4, 1.3))
             poner(tipo, x, y, zs, semilla % 360, DIST["arbol"], escala, semilla)
-            puestos.append((x, y))
     # árboles del LiDAR que OSM no tiene (parques, solares, montaña): máximos locales de la copa
     altura = np.nan_to_num(veg - suelo, nan=0.0)
     altura[np.isfinite(edif)] = 0.0
@@ -194,6 +206,8 @@ def construir(osm, capas, e0h, n1h):
         for x, y, fi, ci in zip(xs[libres], ys[libres], f[libres], c[libres]):
             h = float(altura[fi, ci])
             semilla = zlib.crc32(f"{x:.1f},{y:.1f}".encode())
+            if sobra(x, y, semilla):
+                continue
             tipo = "pino" if h > 9 and semilla % 3 == 0 else "frondoso"  # en la sierra de Marina abundan los pinos
             poner(tipo, x, y, z_suelo(x, y), semilla % 360, DIST["arbol"],
                   float(np.clip(h / ALTURA_PROP[tipo], 0.4, 1.3)), semilla)

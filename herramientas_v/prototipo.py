@@ -125,7 +125,7 @@ def tinte_muro(orto):
     return np.clip(m * 0.85, 30, 255)
 
 
-def separar_muros(v, n, tris, rango=3.0, orto=None):
+def separar_muros(v, n, tris, rango=3.0, orto=None, rapida=None, rango_rapida=1.8):
     """Triángulos del terreno casi verticales (suben más de 'rango' m en 2 m: muros de contención,
     taludes de la C-31): la ortofoto se estiraba en ellos. Se devuelven aparte, con UV vertical para la
     textura de muro. -> (índices llanos, geometría de muro o None).
@@ -134,16 +134,19 @@ def separar_muros(v, n, tris, rango=3.0, orto=None):
     se tiñe del color del sitio, para que no salte de la tierra al gris."""
     k = int(round(np.sqrt(len(v))))
     if k * k != len(v) or not len(tris):
-        return tris, None
+        return tris, None, None
     from scipy import ndimage
     z = v[:, 2].reshape(k, k)
     esq = np.stack([z[:-1, :-1], z[:-1, 1:], z[1:, :-1], z[1:, 1:]])
-    cuadro = esq.max(0) - esq.min(0) > rango
+    salto = esq.max(0) - esq.min(0)
+    cuadro = salto > rango
+    if rapida is not None:  # junto a las vías rápidas lo empinado son trincheras de hormigón: umbral más bajo
+        cuadro |= rapida & (salto > rango_rapida)
     cuadro = ndimage.binary_opening(ndimage.binary_closing(cuadro, iterations=1), iterations=1) |         (esq.max(0) - esq.min(0) > 2.5 * rango)  # lo muy vertical siempre es muro
     fila, col = tris.min(1) // k, (tris % k).min(1)
     empinado = cuadro[np.minimum(fila, k - 2), np.minimum(col, k - 2)]
     if not empinado.any():
-        return tris, None
+        return tris, None, None
     t = tris[empinado]
     p = v[t].reshape(-1, 3)
     nn = n[t].reshape(-1, 3)
@@ -171,9 +174,42 @@ def separar_muros(v, n, tris, rango=3.0, orto=None):
         rgb = np.clip(peq[cy, cx] * (255 / 222) * 0.92, 0, 255).astype(int)  # la pared, algo más oscura
     else:
         rgb = np.full((len(p), 3), 235)
-    muro = dict(v=p, n=nn, uv=uv, color=np.c_[rgb, np.full(len(p), 255)],
-                i=np.arange(len(p)).reshape(-1, 3))
-    return tris[~empinado], muro
+    color = np.c_[rgb, np.full(len(p), 255)]
+    hormigon = np.zeros(len(t), bool)
+    if rapida is not None:
+        f_e, c_e = np.minimum(fila[empinado], k - 2), np.minimum(col[empinado], k - 2)
+        hormigon = rapida[f_e, c_e]
+
+    def trozo(sel):
+        if not sel.any():
+            return None
+        vs = np.repeat(sel, 3)
+        return dict(v=p[vs], n=nn[vs], uv=uv[vs], color=color[vs], i=np.arange(vs.sum()).reshape(-1, 3))
+    return tris[~empinado], trozo(~hormigon), trozo(hormigon)
+
+
+def vias_rapidas(osm_hoja):
+    """Autopistas y vías rápidas a nivel o en trinchera (sin túneles ni puentes), con 30 m de margen."""
+    if osm_hoja is None:
+        return None
+    g = [shapely.LineString(v["xy"]).buffer(30.0, quad_segs=2) for v in osm_hoja["vias"]
+         if v["tags"].get("highway") in calles_v.RAPIDAS and len(v["xy"]) > 1
+         and v["tags"].get("tunnel") in (None, "no") and v["tags"].get("bridge") in (None, "no")]
+    if not g:
+        return None
+    u = shapely.union_all(g)
+    shapely.prepare(u)
+    return u
+
+
+def cerca_rapida(rapidas, e0, n0):
+    """Cuadros de la malla del terreno de la casilla (fila 0 = norte) a menos de 30 m de una vía rápida."""
+    if rapidas is None:
+        return None
+    k = int(CASILLA / PASO)
+    c = (np.arange(k) + 0.5) * PASO
+    X, Y = np.meshgrid(e0 + c, n0 + CASILLA - c)
+    return shapely.contains_xy(rapidas, X, Y)
 
 
 def mascara_edificios(partes, centros, e0h, n1h, m):
@@ -215,6 +251,20 @@ def mascara_vias(osm, e0h, n1h, m):
         if a["tags"].get("amenity") == "parking" and len(a["xy"]) > 2:
             dib_s.polygon(a_px(a["xy"]), fill=1)
     return np.asarray(img, bool), np.asarray(img_s, bool)
+
+
+def alisar_calles(s, vias):
+    """Bajo las calles (eje de OSM y 8 m a cada lado) el suelo sin picos de menos de ~10 m de ancho: el LiDAR deja
+    restos del tablero de los puentes y de las barreras en el suelo, el terreno salía empinado y calles_v quitaba
+    ahí el asfalto (cruce bajo el puente del tren en el Besòs). Las cuestas de verdad no cambian (apertura)."""
+    from scipy import ndimage
+    zona = ndimage.binary_dilation(vias, iterations=16)
+    if not zona.any():
+        return s
+    hueco = np.isnan(s)
+    bajo = ndimage.grey_erosion(np.where(hueco, np.inf, s), size=21, mode="nearest")
+    abierto = ndimage.grey_dilation(np.where(np.isfinite(bajo), bajo, -np.inf), size=21, mode="nearest")
+    return np.where(zona & ~hueco & np.isfinite(abierto), np.fmin(s, abierto), s)
 
 
 def rellenar_hoyos(s, vias, servicio):
@@ -294,6 +344,7 @@ def terreno(capas, e0h, n1h, e0, n0):
         s = capas["suelo"].astype(np.float32)
         if "mascara_vias" in capas:  # antes de bajar el suelo de los edificios (si no, lo volvería a subir)
             s, capas["relleno"] = rellenar_hoyos(s, *capas["mascara_vias"])
+            s = alisar_calles(s, capas["mascara_vias"][0])
         if "mascara_edif" in capas:
             # dentro de los edificios del Catastro, el suelo más bajo de 2 m alrededor: una plaza sobre un
             # podio o el suelo interpolado bajo el edificio sacaban dientes de sierra delante de la fachada
@@ -537,6 +588,7 @@ def main():
         puentes_v.extremos_internos(puentes)  # con todos: un tramo que sigue en otra vía no baja al suelo
         del osm
     relieve = puentes_v.Relieve()
+    rapidas = vias_rapidas(osm_hoja)  # trincheras de hormigón junto a ellas (separar_muros)
     xml = SALIDA / "xml"
     shutil.rmtree(SALIDA, ignore_errors=True)
     xml.mkdir(parents=True)
@@ -555,7 +607,8 @@ def main():
             img_orto = bajo_puentes(mosaico(e0, n0, CASILLA, PX_SUELO), capas, e0h, n1h, e0, n0)
             rage.escribir_ytd(xml / f"{orto}.ytd.xml",
                               {orto: (img_orto, False),
-                               "bcn_muro": (textura_muro(tinte_muro(img_orto)), False)})
+                               "bcn_muro": (textura_muro(tinte_muro(img_orto)), False),
+                               "bcn_hormigon": (textura_muro((150, 148, 143)), False)})
             v, n, uv, tris = terreno(capas, e0h, n1h, e0, n0)
             # túneles: fuera el terreno que se mete en el tubo (la pared de la boca)
             cerca_t = [t for t in tuneles if t["pts"][:, 0].max() >= e0 - 10 and t["pts"][:, 0].min() < e0 + CASILLA + 10
@@ -603,10 +656,11 @@ def main():
                 dentro = shapely.contains_xy(cubierto[0], v[:, 0] + e0 + CASILLA / 2, v[:, 1] + n0 + CASILLA / 2)
                 v_ver = v.copy()
                 v_ver[dentro, 2] -= HUNDIR
-            llano, muro = separar_muros(v_ver, n, tris, orto=img_orto)
+            llano, muro, hormigon = separar_muros(v_ver, n, tris, orto=img_orto,
+                                                  rapida=cerca_rapida(rapidas, e0, n0))
             geos_t = [dict(textura=orto, color=np.full((len(t["v"]), 4), 255), **t)
                       for t in partir(dict(v=v_ver, n=n, uv=uv, i=llano))] + \
-                     ([dict(textura="bcn_muro", **t) for t in partir(muro)] if muro else [])
+                     ([dict(textura="bcn_muro", **t) for t in partir(muro)] if muro else []) +                      ([dict(textura="bcn_hormigon", **t) for t in partir(hormigon)] if hormigon else [])
             if geos_t:  # una casilla toda de mar no lleva terreno: se ve el agua del juego
                 rage.escribir_ydr(xml / f"bcn_t_{nombre}.ydr.xml", f"bcn_t_{nombre}", geos_t, DIST_TERRENO)
                 rage.escribir_ybn(xml / f"bcn_t_{nombre}.ybn.xml", v + mundo, tris, [rage.MAT_PAVEMENT],

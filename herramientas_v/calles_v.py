@@ -32,6 +32,9 @@ APARCAMIENTO = {"primary", "secondary", "tertiary", "residential", "unclassified
 CON_LINEAS = {"motorway", "trunk", "primary", "secondary", "tertiary", "motorway_link", "trunk_link",
               "primary_link", "secondary_link", "tertiary_link", "residential", "unclassified"}
 PEATONALES = {"pedestrian"}
+RAPIDAS = ("motorway", "trunk", "motorway_link", "trunk_link")
+ARCEN = 1.8    # m de arcén a cada lado de las vías rápidas
+MEDIANA = 7.0  # m: huecos entre calzadas rápidas de hasta el doble se rellenan de mediana
 SUBE = dict(vi_asfalto=0.04, vi_aparcamiento=0.04, vi_acera=0.13, vi_linea=0.055)  # sobre el terreno (m)
 BORDILLO = 0.13
 ESCALA = dict(vi_asfalto=4.0, vi_aparcamiento=4.0, vi_acera=2.0, vi_linea=1.0)  # m por repetición de textura
@@ -473,6 +476,16 @@ def construir(osm, edificios, z, e0, n0, lado, paso, cubierto=None, hoyos=None):
     acera = shapely.union_all(urbanas + _lineas_acera(osm, caja) + plazas)
     verde = _poligonos(osm, caja, lambda t: t.get("leisure") in ("park", "garden", "pitch", "playground")
                        or t.get("landuse") in ("grass", "forest", "meadow") or t.get("natural") in ("water", "beach", "sand", "scrub", "wood"))
+    # autopistas y vías rápidas: sin acera, lo de fuera del asfalto era terreno con la ortofoto de la propia
+    # calzada (coches y pintura aplastados). Arcén de ARCEN m a cada lado y, entre las dos calzadas y en los
+    # triángulos de los ramales (huecos de hasta 2 * MEDIANA m), mediana de hormigón.
+    rapidas = [(linea, w) for linea, t, w in vias if t.get("highway") in RAPIDAS]
+    if rapidas:
+        arcen = shapely.union_all([linea.buffer(w / 2 + ARCEN, quad_segs=4, cap_style="flat") for linea, w in rapidas])
+        arcen = arcen.difference(construido)
+        mediana = arcen.buffer(MEDIANA, quad_segs=2).buffer(-MEDIANA, quad_segs=2)
+        calzada = calzada.union(arcen)
+        acera = acera.union(mediana.difference(construido).difference(calzada))
     acera = acera.difference(construido).difference(calzada).difference(aparc)
     trenes = _vias_tren(osm, caja)
     if trenes:

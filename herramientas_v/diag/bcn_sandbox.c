@@ -152,6 +152,8 @@ static const char *HISTORIA[] = {
     "ob_franklin_wine", "ob_huffing_gas", "ob_mp_bed_high", "ob_mp_bed_low", "ob_mp_bed_med", "ob_mp_shower_med",
     "ob_mp_stripper", "ob_mr_raspberry_jam", "ob_poledancer", "ob_sofa_franklin", "ob_sofa_michael",
     "ob_telescope", "ob_tv", "ob_vend1", "ob_vend2", "ob_wheatgrass", "savegame_bed", "director_mode",
+    /* el móvil: la llamada de Simeon de la partida guardada sonaba en bucle (se colgaba y el juego la relanzaba) */
+    "cellphone_controller", "cellphone_flashhand",
 };
 #define N_HISTORIA ((int)(sizeof HISTORIA / sizeof HISTORIA[0]))
 
@@ -221,11 +223,11 @@ static void colgar(void)
         sh_init(0xFE99B66D079CF6BCULL); pi(k); pi(177); pi(1); llamar();  /* DISABLE_CONTROL_ACTION */
         sh_init(0xE8A25867FBA3B05EULL); pi(k); pi(177); pf(1.0f); llamar();
     }
-    if (GetTickCount() - desde > 2000) {  /* sigue sonando: fuera el móvil (el juego lo vuelve a lanzar luego) */
+    {  /* fuera el móvil en cuanto suena: colgando, el juego volvía a llamar al momento */
         sh_init(0x3BC861DF703E5097ULL); llamar();  /* DESTROY_MOBILE_PHONE */
         parar("cellphone_controller");
         desde = GetTickCount();
-        apuntar("llamada: movil cerrado");
+        if (veces < 3) apuntar("llamada: movil cerrado");
     }
     if (veces++ < 3 || veces % 200 == 0) {
         char t[64];
