@@ -8,6 +8,7 @@
 Las plantillas de referencia, exportadas con Sollumz, están en plantillas/.
 Coordenadas: metros, X este, Y norte, Z arriba (como el mapa de GTA V).
 """
+import shutil
 import io
 import struct
 import subprocess
@@ -21,6 +22,8 @@ from PIL import Image
 AQUI = Path(__file__).resolve().parent
 SZIO = Path.home() / "AppData/Roaming/Blender Foundation/Blender/5.2/extensions/.user/user_default/sollumz/lib/python3.13/site-packages"
 DOTNET = Path.home() / "AppData/Local/Microsoft/dotnet/dotnet.exe"
+if not DOTNET.exists():  # instalado para todo el equipo o en el PATH
+    DOTNET = Path(shutil.which("dotnet") or "dotnet")
 CWTOOL = AQUI / "cwtool" / "bin" / "cwtool.dll"
 
 # Materiales de colisión (índices de la lista de Sollumz / CodeWalker)

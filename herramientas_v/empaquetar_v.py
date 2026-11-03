@@ -22,7 +22,7 @@ import config_v
 import puentes_v
 import rage
 
-GTA = config_v.Path(r"C:\Program Files (x86)\Steam\steamapps\common\Grand Theft Auto V")
+GTA = config_v.GTA
 PACK = "bcn"
 OBRA = config_v.MOD / "dlc"
 SOLO_PRUEBA = config_v.os.environ.get("BCN_SOLO_PRUEBA") == "1"

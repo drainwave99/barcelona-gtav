@@ -10,6 +10,8 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parent.parent
 DATOS = RAIZ / "datos_v"
 MOD = RAIZ / "mod_v"
+# carpeta del juego (GTA V Legacy); otra instalación: variable de entorno GTA_V_DIR
+GTA = Path(os.environ.get("GTA_V_DIR", r"C:\Program Files (x86)\Steam\steamapps\common\Grand Theft Auto V"))
 
 ORIGEN_E, ORIGEN_N = 430500.0, 4585000.0
 

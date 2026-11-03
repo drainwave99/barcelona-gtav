@@ -14,7 +14,7 @@ import time
 
 import config_v
 
-GTA = config_v.Path(r"C:\Program Files (x86)\Steam\steamapps\common\Grand Theft Auto V")
+GTA = config_v.GTA
 DLCPACKS = GTA / "mods" / "update" / "x64" / "dlcpacks"
 VERSIONES = config_v.MOD / "versiones"
 GUARDAR = 1  # copias automáticas "antes" que se guardan; las más viejas se borran (pesan ~13 GB cada una)
