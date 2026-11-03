@@ -280,7 +280,69 @@ def extremos_internos(vias):
         v["internos"] = (cuenta[(round(a[0], 1), round(a[1], 1))] > 1, cuenta[(round(b[0], 1), round(b[1], 1))] > 1)
 
 
-def perfil(via, relieve):
+def _sin_islas(ds, medida, suelo, isla=25.0, hueco_min=20.0, sobre=3.0):
+    """Quita las medidas sueltas (menos de isla m) con huecos largos a los dos lados y más de sobre m por encima del
+    suelo de los dos bordes: son otro puente que cruza por encima (el LiDAR ve el de arriba), no el tablero propio
+    (un vano corto propio tiene el suelo subiendo a su encuentro)."""
+    m = medida.copy()
+    hay = ~np.isnan(m)
+    i, n = 0, len(ds)
+    while i < n:
+        if not hay[i]:
+            i += 1
+            continue
+        j = i
+        while j < n and hay[j]:
+            j += 1
+        a0 = i - 1
+        while a0 >= 0 and not hay[a0]:
+            a0 -= 1
+        b0 = j
+        while b0 < n and not hay[b0]:
+            b0 += 1
+        hueco_antes = ds[i - 1] - ds[a0 + 1] if i > 0 else 0.0
+        hueco_despues = ds[b0 - 1] - ds[j] if j < n else 0.0
+        alto = i > 0 and j < n and np.nanmedian(m[i:j]) - max(suelo[i - 1], suelo[j]) > sobre
+        if ds[j - 1] - ds[i] < isla and hueco_antes >= hueco_min and hueco_despues >= hueco_min and alto:
+            m[i:j] = np.nan
+        i = j
+    return m
+
+
+def _tramos_a_ras(ds, medida, suelo, largo_min=30.0):
+    """Puntos (d, z) a ras de suelo en los huecos sin tablero medido donde la vía va por el suelo: OSM dice puente
+    en todo el tramo, pero el LiDAR solo ve tablero en los vanos de verdad (la C-31 en Badalona va en trinchera
+    entre viaductos; al interpolar en línea recta entre los dos vanos quedaba flotando hasta 7 m sobre el suelo y
+    se comía el puente del carrer del General Weyler que pasa por encima). Es suelo si en los dos bordes del hueco
+    el terreno llega al tablero medido, por dentro no tiene escalones y no se hunde (si se hunde, es un vano tapado
+    por otro puente de encima y se interpola como antes)."""
+    out = []
+    medida = _sin_islas(ds, medida, suelo)
+    hueco = np.isnan(medida)
+    i, n = 0, len(ds)
+    while i < n:
+        if not hueco[i]:
+            i += 1
+            continue
+        j = i
+        while j < n and hueco[j]:
+            j += 1
+        if i > 0 and j < n and ds[j - 1] - ds[i] >= largo_min:  # entre dos tramos medidos
+            za, zb = medida[i - 1], medida[j]
+            # el suelo llega al tablero en los primeros / últimos borde m del hueco (antes aún pasa bajo el vano)
+            borde = 12.0
+            ini = [k for k in range(i, j) if ds[k] - ds[i] <= borde and abs(suelo[k] - za) < 1.5]
+            fin = [k for k in range(i, j) if ds[j - 1] - ds[k] <= borde and abs(suelo[k] - zb) < 1.5]
+            if ini and fin and fin[-1] > ini[0]:
+                k0, k1 = ini[0], fin[-1] + 1
+                dentro = suelo[k0:k1]
+                if np.abs(np.diff(dentro)).max(initial=0) < 0.8 and dentro.min() > min(za, zb) - 3.0:
+                    out += [(d, zz + 0.05) for d, zz in zip(ds[k0:k1], dentro)]
+        i = j
+    return out
+
+
+def perfil(via, relieve, por_suelo=True):
     """Eje muestreado: puntos (N, 2), derecha (N, 2), distancia (N), z del tablero (N), suelo (N)."""
     linea = LineString(via["xy"])
     largo = linea.length
@@ -307,6 +369,10 @@ def perfil(via, relieve):
         bajo = ndimage.minimum_filter1d(np.where(np.isnan(medida), np.inf, medida), max(int(15 / PASO), 1) * 2 + 1)
         medida[medida > bajo + 2.5] = np.nan
     anclas_d, anclas_z = list(ds[~np.isnan(medida)]), list(medida[~np.isnan(medida)])
+    if por_suelo:
+        for d, zz in _tramos_a_ras(ds, medida, suelo):
+            anclas_d.append(d)
+            anclas_z.append(zz)
     for k, interno in zip((0, -1), via["internos"]):
         if not interno and np.isnan(medida[k]):  # estribo: la calzada llega al terreno
             anclas_d.append(ds[k])
