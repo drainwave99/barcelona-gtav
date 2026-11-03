@@ -582,7 +582,9 @@ static void principal(void)
         int m = (GetAsyncKeyState('M') & 0x8000) != 0;
         int pulsada = m && !tecla_m_antes;
         tecla_m_antes = m;
-        int libre = !menu_pausa() && !pantalla_negra() && !en_escena();
+        HANDLE metro = OpenMutexA(SYNCHRONIZE, FALSE, "Local\bcn_metro_panel");   /* bcn_metro.asi con su panel abierto */
+        if (metro) CloseHandle(metro);
+        int libre = !menu_pausa() && !pantalla_negra() && !en_escena() && !metro;
         if (pulsada && libre) {
             mapa_abierto = !mapa_abierto;
             if (mapa_abierto) { float pz; coords(ped, &mx, &my, &pz); mzoom = 3000.0f; }

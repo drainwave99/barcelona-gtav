@@ -210,6 +210,16 @@ static void trayecto(int a, int b, int *paradas, int *transbordos)
 }
 
 /* ---- viaje ---- */
+static const char *cartel;   /* lo que se pinta en negro mientras carga el suelo (el fundido del juego taparía el texto) */
+static void sin_hud(void) { sh_init(0x719FF505F097FD20ULL); llamar(); }   /* HIDE_HUD_AND_RADAR_THIS_FRAME */
+static void tapar(void)
+{
+    sin_hud();
+    orden(0);
+    rect(0.5f, 0.5f, 1.0f, 1.0f, 0, 0, 0, 255);
+    orden(1);
+    if (cartel) texto(cartel, 0.5f, 0.47f, 0.6f, 1, 255, 255, 255);
+}
 static void salir_por(int ped, int b)
 {
     Boca *bo = &bocas[b];
@@ -221,7 +231,7 @@ static void salir_por(int ped, int b)
         pedir_colision(bo->x, bo->y, z);
         float zs;
         if (suelo(bo->x, bo->y, &zs) && fabsf(zs - z) < 6.0f) { z = zs; hay = 1; break; }
-        sh_wait(50);
+        for (DWORD t = GetTickCount(); GetTickCount() - t < 50;) { tapar(); sh_wait(0); }
     }
     if (!hay) apuntar("sin suelo en la boca");
     mover(ped, bo->x, bo->y, z + 0.1f);
@@ -245,6 +255,7 @@ static void panel(int ped, int origen, int boca_origen)
         for (int j = 0; j < lin[i].n; j++)
             if (lin[i].est[j] == origen) { l = i; sel = j; goto hallada; }
 hallada:
+    fundir_vuelta(0);   /* el fundido del juego tapa lo que dibuja el script: el panel ya es opaco */
     for (int v = 0; v < 256; v++) tecla(v);   /* olvida lo que estuviera pulsado */
     for (;;) {
         sh_wait(0);
@@ -257,6 +268,7 @@ hallada:
         int salir = tecla(VK_BACK) || tecla(VK_ESCAPE);
         int ir = tecla(VK_RETURN);
         /* dibujo */
+        sin_hud();
         orden(0);
         rect(0.5f, 0.5f, 1.0f, 1.0f, 8, 10, 14, 255);
         orden(1);
@@ -300,7 +312,9 @@ hallada:
         texto("Izquierda/derecha: linea   Arriba/abajo: estacion   Intro: viajar   Retroceso: salir a la calle",
               0.5f, 0.93f, 0.32f, 1, 200, 200, 200);
         if (salir) {
+            cartel = NULL;
             salir_por(ped, boca_origen);
+            fundir_negro(0);
             break;
         }
         if (ir && destino != origen) {
@@ -313,13 +327,12 @@ hallada:
             while (GetTickCount() - t0 < 3500) {   /* el viaje: negro, el nombre y el traqueteo */
                 sh_wait(0);
                 sin_controles();
-                orden(0);
-                rect(0.5f, 0.5f, 1.0f, 1.0f, 0, 0, 0, 255);
-                orden(1);
                 snprintf(t, sizeof t, "Viajando a %s...", est[destino].nombre);
-                texto(t, 0.5f, 0.47f, 0.6f, 1, 255, 255, 255);
+                cartel = t;
+                tapar();
                 if (!puesto && GetTickCount() - t0 > 300) { salir_por(ped, b); puesto = 1; }
             }
+            fundir_negro(0);
             reloj_mas(p * 2 + tr * 4);
             snprintf(t, sizeof t, "viaje %s -> %s: %d paradas, %d transbordos", est[origen].nombre, est[destino].nombre, p, tr);
             apuntar(t);
@@ -396,7 +409,9 @@ static void principal(void)
         if (tecla('E')) {
             fundir_negro(500);
             for (int i = 0; i < 60 && !en_negro(); i++) sh_wait(20);
+            HANDLE marca = CreateMutexA(NULL, FALSE, "Local\bcn_metro_panel");   /* que bcn_radar.asi no pinte encima */
             panel(ped, bocas[cerca].est, cerca);
+            if (marca) CloseHandle(marca);
         }
     }
 }
