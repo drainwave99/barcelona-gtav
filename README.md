@@ -65,3 +65,4 @@ GTA V y sus archivos son de Rockstar Games. Este proyecto no incluye ninguno y s
 1. Abre un *issue* con el fallo o la idea. Si es un fallo del mapa, añade una captura y las coordenadas: la tecla F9 las guarda en `bcn_marcas.txt`.
 2. Trabaja en una rama propia y abre un *pull request*.
 3. Para probar un cambio basta con regenerar y empaquetar las hojas afectadas. No hace falta el mapa entero.
+4. Antes de abrir el *pull request*, pasa `python herramientas_v/comprobar_v.py` (y `--a-fondo` con las hojas que hayas tocado) y pega el resultado. Si avisa de que tus datos no son los de `VERSIONES_DATOS.json`, dilo también.

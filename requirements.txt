@@ -1,7 +1,8 @@
-numpy
-scipy
-shapely>=2
-pillow
-pyproj
-osmium
-laspy[lazrs]
+numpy==2.5.4
+scipy==1.18.1
+shapely==2.2.0
+pillow==13.0.0
+pyproj==3.8.0
+osmium==4.3.2
+laspy==2.7.0
+lazrs==0.8.2

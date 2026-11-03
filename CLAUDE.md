@@ -57,6 +57,17 @@ herramientas descargadas (`descargas/`) no se suben; cada uno los regenera en su
 
 Para probar un cambio no hace falta el mapa entero: genera y empaqueta solo las hojas afectadas.
 
+## Comprobar que el mapa sale bien
+
+- `python comprobar_v.py` revisa todas las hojas en segundos: generación sin errores, cada modelo con su colisión
+  (sin ella se cae al vacío), texturas, LiDAR sin huecos, paquetes instalados al día y huecos en el mapa.
+  `python comprobar_v.py 431583 --a-fondo` además busca edificios flotando en esas hojas (unos 10 s por hoja).
+  Sale con código 1 si hay fallos. **Pásalo antes de proponer cualquier cambio** y pon el resultado en el pull request.
+- `VERSIONES_DATOS.json` (raíz) apunta con qué datos y versiones se generó la versión buena del mapa (fecha de
+  OpenStreetMap y del Catastro, huellas sha256, versiones de Python). `comprobar_v.py` avisa si tus datos son
+  distintos: con otros datos el mapa puede salir distinto. Solo quien genera la versión buena lo rehace
+  (`python comprobar_v.py --huella`), y siempre en un commit aparte que lo explique.
+
 ## Cosas aprendidas (para no repetir errores)
 
 - Los scripts de ScriptHookV no se ejecutan con el menú de pausa abierto: no se puede dibujar encima.
