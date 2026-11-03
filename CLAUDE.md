@@ -40,7 +40,9 @@ herramientas descargadas (`descargas/`) no se suben; cada uno los regenera en su
 2. **En el juego**: ScriptHookV + un cargador de ASI (`dinput8.dll`) y la carpeta `mods/` (OpenIV o equivalente).
    Los descarga cada uno de su web oficial.
 3. **Datos** (en este orden; todos se pueden cortar y volver a lanzar):
-   - OpenStreetMap: `datos/osm/cataluna-latest.osm.pbf` de Geofabrik; luego `python osm_v.py E0 E1 N0 N1`
+   - OpenStreetMap: el **mismo** extracto con el que se generó la versión buena, adjunto en la release
+     `datos-osm-2026-10-28` del repositorio (no el de Geofabrik de hoy, que cambia cada día):
+     `gh release download datos-osm-2026-10-28 -D datos/osm` (© colaboradores de OpenStreetMap, ODbL). Luego `python osm_v.py E0 E1 N0 N1`
      (y `costa_v.py`, `rios_v.py`, `tuneles_v.py`).
    - Catastro: los GML INSPIRE de edificios de cada municipio (08900, 08015, 08193, 08245…) descomprimidos en
      `datos_v/catastro/A.ES.SDGC.BU.<muni>/`; luego `python catastro.py`.
