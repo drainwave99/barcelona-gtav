@@ -355,7 +355,7 @@ static class Programa
         GTA5Keys.LoadFromPath(gta, false, null);
         var rpf = new RpfFile(Path.GetFullPath(archivo), Path.GetFileName(archivo));
         rpf.ScanStructure(s => { }, e => Console.Error.WriteLine(e));
-        var re = omitir == null ? null : new System.Text.RegularExpressions.Regex(omitir);
+        var re = omitir == null || omitir.StartsWith("solo:") ? null : new System.Text.RegularExpressions.Regex(omitir);
         int n = 0, fuera = 0;
         // Nombres de verdad: los RPF hechos con más de 64 KB de nombres tienen el puntero (16 bits) desbordado,
         // pero los nombres están todos en la tabla, seguidos y en el orden de las entradas (sin repetidos)
