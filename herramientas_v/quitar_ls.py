@@ -7,7 +7,8 @@ se restaura antes desde la copia de seguridad: así se puede volver a ejecutar s
 
   mods/update/update.rpf/common/data/levels/gta5/images.meta   sin RPF del mapa
   mods/update/update.rpf/common/data/levels/gta5/gta5.meta     sin sus ityp permanentes, luces lejanas, zonas...
-  mods/update/update.rpf/common/data/levels/gta5/popzone.ipl   una sola zona (Downt) sobre todo el mapa
+  mods/update/update.rpf/common/data/levels/gta5/popzone.ipl   los barrios (barrios_v; sin ellos, una sola zona)
+  mods/update/update.rpf/x64/patch/data/lang/<idioma>.rpf      global.gxt2 con los nombres de los barrios
   mods/update/update.rpf/x64/levels/gta5/sp_manifest.ymt       sin puntos de escenario
   mods/update/update.rpf/dlc_patch/<pack>/content.xml          parches y DLC sin sus RPF del mapa
   mods/update/update.rpf/common/data/levels/gta5/water.xml     el mar de Barcelona (costa real) y agua donde no
@@ -264,6 +265,9 @@ def main():
         tune.mkdir(parents=True)
         shutil.copy2(ymt, tune / "minimap.ymt")
     mapa_pausa_v.meter_en(raiz, GTA, COPIA)
+    # los barrios como zonas (nombre en el mapa del menú y en GET_NAME_OF_ZONE) en vez de la zona única
+    import barrios_v
+    barrios_v.meter_en(raiz, GTA, COPIA)
 
     # content.xml: el de dlc_patch de update.rpf manda sobre el del propio paquete
     contenidos = {}

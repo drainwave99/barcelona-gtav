@@ -62,6 +62,16 @@ static int hud_oculto(void) { sh_init(0xA86478C6958735C5ULL); return (int)(*llam
 static int cargando(void) { sh_init(0x10D0A8F259E93EC9ULL); return (int)(*llamar() & 1); }
 static int pantalla_negra(void) { sh_init(0xB16FCE9DDC7BA182ULL); return (int)(*llamar() & 1); }
 static int en_escena(void) { sh_init(0xD3C2E180A40F031EULL); return (int)(*llamar() & 1); } /* IS_CUTSCENE_PLAYING */
+/* el barrio: la etiqueta de la zona (popzone.ipl de barrios_v) y su texto en el idioma del juego */
+static const char *zona_en(float x, float y, float z)
+{
+    sh_init(0xCD90657D4C30E1CAULL); pf(x); pf(y); pf(z);   /* GET_NAME_OF_ZONE */
+    const char *et = (const char *)(uintptr_t)*llamar();
+    if (!et || strncmp(et, "BCN", 3) != 0) return NULL;   /* sin los barrios instalados: nada */
+    sh_init(0x7B5280EBA9840C72ULL); pp(et);                 /* GET_FILENAME_FOR_AUDIO_CONVERSATION: texto GXT */
+    const char *t = (const char *)(uintptr_t)*llamar();
+    return (t && *t && strcmp(t, "NULL") != 0) ? t : NULL;
+}
 static float aspecto(void) { sh_init(0xF1307EF624A80D87ULL); pi(0); return rf(llamar(), 0); }
 static void pedir_ytd(const char *n) { sh_init(0xDFA2EF8E04127DD5ULL); pp(n); pi(0); llamar(); }
 static int ytd_listo(const char *n) { sh_init(0x0145F696AAAAD2E4ULL); pp(n); return (int)(*llamar() & 1); }
@@ -283,15 +293,19 @@ static void dibujar_calle(int ped)
 {
     static DWORD ultimo;
     static const char *calle, *mun;
+    static char lugar[160];   /* "barrio, municipio" (o solo uno de los dos) */
     if (GetTickCount() - ultimo > 300) {
         float x, y, z;
         coords(ped, &x, &y, &z);
         calle = calle_en(x, y, &mun);
+        const char *barrio = zona_en(x, y, z);
+        if (barrio && mun && strcmp(barrio, mun) != 0) snprintf(lugar, sizeof lugar, "%s, %s", barrio, mun);
+        else snprintf(lugar, sizeof lugar, "%s", barrio ? barrio : mun ? mun : "");
         ultimo = GetTickCount();
     }
     orden(4);
     if (calle) texto_a(calle, 0.985f, 0.895f, 0.55f, 2);
-    if (mun) texto_a(mun, 0.985f, 0.935f, 0.40f, 2);
+    if (lugar[0]) texto_a(lugar, 0.985f, 0.935f, 0.40f, 2);
 }
 
 /* ---- radar ---- */
