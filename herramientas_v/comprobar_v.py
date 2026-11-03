@@ -78,7 +78,7 @@ def comprobar_archivos(hoja):
     # terreno (t), edificios (e), puentes (p), pasos (u), andenes (a): el modelo sin su colisión no se pisa
     for m in sorted(modelos):
         tipo = m.split("_")[1]
-        if tipo in "tepua" and len(tipo) == 1 and m not in colisiones:
+        if tipo in "tepuam" and len(tipo) == 1 and m not in colisiones:
             fallo(hoja, f"{m} no tiene colisión: ahí se cae al vacío")
     for c in sorted(colisiones - modelos):
         aviso(hoja, f"colisión {c} sin modelo (pared invisible)")

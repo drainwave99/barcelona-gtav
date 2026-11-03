@@ -29,6 +29,7 @@ import puentes_v
 import rage
 import tuneles_v
 import andenes_v
+import bocas_v
 
 CASILLA = 250
 PASO = 2.0  # malla del terreno
@@ -629,10 +630,12 @@ def main():
                        e0 <= vv["p"]["anillos"][0][:, 0].mean() < e0 + CASILLA and
                        n0 <= vv["p"]["anillos"][0][:, 1].mean() < n0 + CASILLA]
             todas_alturas += [vv["techo"] - vv["suelo"] for vv in propios]
+            bocas = []  # bocas de metro de la casilla (las pone calles_v): escalera y vestíbulo en 3D (bocas_v)
             if osm_hoja is not None:  # calzada, aceras, aparcamientos y marcas viales sobre el terreno
                 k = int(CASILLA / PASO) + 1
                 suelo_calles = calles_v.construir(osm_hoja, [vv["poli"] for vv in vecinos], v[:, 2].reshape(k, k),
-                                                  e0, n0, CASILLA, PASO, cubierto, hoyos_casilla(capas, e0h, n1h, e0, n0))
+                                                  e0, n0, CASILLA, PASO, cubierto, hoyos_casilla(capas, e0h, n1h, e0, n0),
+                                                  bocas)
                 if suelo_calles:
                     rage.escribir_ydr(xml / f"bcn_c_{nombre}.ydr.xml", f"bcn_c_{nombre}",
                                       [dict(textura=t, recorte=t.endswith("_alfa"), **trozo) for t, g in suelo_calles.items() for trozo in partir(g)],
@@ -649,6 +652,17 @@ def main():
                     rage.escribir_ybn(xml / f"bcn_a_{nombre}.ybn.xml", col_a[0] + mundo, col_a[1], [rage.MAT_CONCRETE],
                                       np.zeros(len(col_a[1]), int))
                     arquetipos.append((f"bcn_a_{nombre}", "bcn_obra", DIST_EDIFICIOS))
+            if bocas:  # el hueco de la escalera: fuera el terreno y una losa de acera hasta el borde
+                quedan, marco = bocas_v.hueco(v, tris, bocas, (e0 + CASILLA / 2, n0 + CASILLA / 2))
+                tris = tris[quedan]
+                malla_b, col_b = bocas_v.construir(bocas, marco, (e0 + CASILLA / 2, n0 + CASILLA / 2))
+                if malla_b:
+                    rage.escribir_ydr(xml / f"bcn_m_{nombre}.ydr.xml", f"bcn_m_{nombre}",
+                                      [dict(textura=t, recorte=t.endswith("_alfa"), **trozo) for t, g in malla_b.items()
+                                       for trozo in partir(g)], DIST_EDIFICIOS)
+                    rage.escribir_ybn(xml / f"bcn_m_{nombre}.ybn.xml", col_b[0] + mundo, col_b[1], [rage.MAT_CONCRETE],
+                                      np.zeros(len(col_b[1]), int))
+                    arquetipos.append((f"bcn_m_{nombre}", "bcn_obra", DIST_EDIFICIOS))
             # El terreno que se ve baja HUNDIR m bajo calles y aceras: a 4 cm por debajo del asfalto, en las cuestas
             # el juego no sabía cuál va delante y el terreno asomaba a dientes de sierra. La colisión no cambia.
             v_ver = v

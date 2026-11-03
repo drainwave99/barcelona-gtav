@@ -596,7 +596,7 @@ static void principal(void)
         int m = (GetAsyncKeyState('M') & 0x8000) != 0;
         int pulsada = m && !tecla_m_antes;
         tecla_m_antes = m;
-        HANDLE metro = OpenMutexA(SYNCHRONIZE, FALSE, "Local\bcn_metro_panel");   /* bcn_metro.asi con su panel abierto */
+        HANDLE metro = OpenMutexA(SYNCHRONIZE, FALSE, "Local\\bcn_metro_panel");   /* bcn_metro.asi con su panel abierto */
         if (metro) CloseHandle(metro);
         int libre = !menu_pausa() && !pantalla_negra() && !en_escena() && !metro;
         if (pulsada && libre) {

@@ -399,6 +399,8 @@ static void principal(void)
             marcador_suelo(bocas[i].x, bocas[i].y, bocas[i].z + 1.0f, 220, 20, 30);
             float d = sqrtf(dx * dx + dy * dy);
             if (d < mejor && fabsf(dz) < 3.0f) { mejor = d; cerca = i; }
+            /* abajo, en el vestibulo al pie de la escalera (bocas_v: de 5 a 17 m de la boca, 4,25 m mas hondo) */
+            else if (d < 18.0f && dz > 2.5f && dz < 6.5f && cerca < 0) cerca = i;
         }
         if (cerca < 0) { tecla('E'); continue; }
         char t[160], ls[64];
@@ -409,7 +411,7 @@ static void principal(void)
         if (tecla('E')) {
             fundir_negro(500);
             for (int i = 0; i < 60 && !en_negro(); i++) sh_wait(20);
-            HANDLE marca = CreateMutexA(NULL, FALSE, "Local\bcn_metro_panel");   /* que bcn_radar.asi no pinte encima */
+            HANDLE marca = CreateMutexA(NULL, FALSE, "Local\\bcn_metro_panel");   /* que bcn_radar.asi no pinte encima */
             panel(ped, bocas[cerca].est, cerca);
             if (marca) CloseHandle(marca);
         }

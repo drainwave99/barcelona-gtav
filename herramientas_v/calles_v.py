@@ -450,10 +450,11 @@ def _tapas(vias, calzada, casilla):
     return centros, ejes
 
 
-def construir(osm, edificios, z, e0, n0, lado, paso, cubierto=None, hoyos=None):
+def construir(osm, edificios, z, e0, n0, lado, paso, cubierto=None, hoyos=None, bocas=None):
     """edificios: lista de Polygon (UTM) del Catastro alrededor de la casilla. cubierto: si es una lista, se le
     añade lo que tapan calzada, aceras y aparcamientos (para hundir ahí el terreno que se ve). hoyos: hoyos del
-    terreno ya rellenados (rampas de parking): se pavimentan como aparcamiento."""
+    terreno ya rellenados (rampas de parking): se pavimentan como aparcamiento. bocas: si es una lista, se le
+    añaden las bocas de metro de la casilla (dict x, y, z, eje, lat) para bocas_v (escalera y vestíbulo en 3D)."""
     marco = 30.0
     caja = (e0 - marco, n0 - marco, e0 + lado + marco, n0 + lado + marco)
     casilla = box(e0, n0, e0 + lado, n0 + lado)
@@ -497,6 +498,11 @@ def construir(osm, edificios, z, e0, n0, lado, paso, cubierto=None, hoyos=None):
     if len(suelo.empinado):  # muros y taludes: sin calle pegada encima (salían pirámides de acera)
         empinado = shapely.union_all(suelo.empinado).buffer(0.2)
         calzada, aparc, acera, pintura = (g.difference(empinado) for g in (calzada, aparc, acera, pintura))
+    import bocas_v
+    rect_bocas = _rect_bocas(osm, vias, construido, casilla)
+    if rect_bocas:  # el hueco de la escalera del metro: sin calle encima
+        hueco = shapely.union_all([bocas_v.rectangulo(b) for b in rect_bocas])
+        calzada, aparc, acera, pintura = (g.difference(hueco) for g in (calzada, aparc, acera, pintura))
     if cubierto is not None:
         cubierto.append(shapely.union_all([calzada, aparc, acera]).intersection(casilla.buffer(paso)))
     out = {}
@@ -518,7 +524,7 @@ def construir(osm, edificios, z, e0, n0, lado, paso, cubierto=None, hoyos=None):
     g = _placas(*_tapas(vias, calzada, casilla), 0.8, suelo, SUBE["vi_linea"] + 0.004, centro)
     if g is not None:
         out["vi_tapa"] = g
-    for tex, g in list(_bocas_metro(osm, vias, construido, casilla, suelo, centro).items()) + \
+    for tex, g in list(_bocas_metro(rect_bocas, suelo, centro, bocas).items()) + \
             list(_vias_a_nivel(osm, casilla, suelo, centro).items()):
         if tex in out:  # se suma a lo que ya hay con esa textura
             base = len(out[tex]["v"])
@@ -634,14 +640,11 @@ def _catenaria(obra, eje, entre=50.0, bajo=None):
                   np.r_[n[:2], 0.0])
 
 
-def _bocas_metro(osm, vias, construido, casilla, suelo, centro):
-    """Bocas de metro (railway=subway_entrance de OSM): el hueco de la escalera en la acera, barandilla en
-    tres lados y el poste con el rombo rojo de la M, alineadas con la calle más cercana."""
-    import fachadas_v
-    m = fachadas_v.Malla()
+def _rect_bocas(osm, vias, construido, casilla):
+    """Bocas de metro (railway=subway_entrance) de la casilla, fuera de edificios: dict(x, y, eje, lat) con el
+    eje a lo largo de la calle más cercana (la escalera baja hacia +eje)."""
     arbol = shapely.STRtree([v[0] for v in vias]) if vias else None
-    c3 = np.r_[centro, 0.0]
-    blanco = (255, 255, 255, 255)
+    out = []
     for nd in osm["nodos"]:
         if nd["tags"].get("railway") != "subway_entrance":
             continue
@@ -655,12 +658,26 @@ def _bocas_metro(osm, vias, construido, casilla, suelo, centro):
             a, b = linea.interpolate(max(d - 1, 0)), linea.interpolate(min(d + 1, linea.length))
             eje = np.array([b.x - a.x, b.y - a.y])
         eje /= np.linalg.norm(eje) + 1e-9
-        lat = np.array([-eje[1], eje[0]])
-        L, W = 5.0, 1.9  # hueco de la escalera
+        out.append(dict(x=float(x), y=float(y), eje=eje, lat=np.array([-eje[1], eje[0]])))
+    return out
+
+
+def _bocas_metro(rect_bocas, suelo, centro, bocas=None):
+    """Lo de la boca de metro que queda en la calle: barandilla en tres lados del hueco y el poste con el rombo
+    rojo de la M. La escalera y el vestíbulo los hace bocas_v (con su hueco en el terreno)."""
+    import bocas_v
+    import fachadas_v
+    m = fachadas_v.Malla()
+    c3 = np.r_[centro, 0.0]
+    blanco = (255, 255, 255, 255)
+    L, W = bocas_v.L, bocas_v.W
+    for r in rect_bocas:
+        x, y, eje, lat = r["x"], r["y"], r["eje"], r["lat"]
         esq = [np.array([x, y]) + eje * su * L / 2 + lat * sv * W / 2 for su, sv in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
         z = float(np.max(suelo.altura(np.array([q[0] for q in esq]), np.array([q[1] for q in esq])))) + SUBE["vi_acera"] + 0.02
+        if bocas is not None:
+            bocas.append(dict(r, z=z))
         P = [np.r_[q, z] - c3 for q in esq]
-        m.quad("vi_metro_esc", P, (0, 0, 1), [(0, 0), (0, 1), (1, 1), (1, 0)], blanco)
         # barandilla: los dos lados largos y el fondo (la boca se abre por -eje)
         for a, b in ((P[0], P[1]), (P[1], P[2]), (P[2], P[3])):
             largo = float(np.linalg.norm(b - a))

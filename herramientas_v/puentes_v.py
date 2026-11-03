@@ -805,6 +805,23 @@ def texturas():
     cu = np.full((256, 256, 3), (196, 198, 200), np.float32) + rng.normal(0, 4, (256, 256))[..., None]
     cu[:, ::32] -= 26  # grecas de la chapa cada 0,5 m
     out["vi_cubierta"] = cu
+    # bocas de metro en 3D (bocas_v): peldaño de granito con canto antideslizante (u a lo ancho, v = 1 peldaño),
+    # azulejo blanco de 15 cm con la franja roja de TMB (v = 0 arriba, 1 en el suelo: 3 m) y suelo de terrazo
+    pe = np.full((128, 128, 3), (172, 168, 160), np.float32) + rng.normal(0, 7, (128, 128))[..., None]
+    pe += ruido(128, 16, 5)[..., None]
+    pe[:14] = np.array([64, 62, 60]) + rng.normal(0, 5, (14, 128))[..., None]  # banda antideslizante del canto
+    out["vi_metro_peldano"] = pe
+    az = np.full((512, 256, 3), (232, 232, 226), np.float32) + rng.normal(0, 3, (512, 256))[..., None]
+    az[::26] = (196, 196, 190)  # juntas (26 px = 15 cm con 3 m en 512 px)
+    az[:, ::26] = (196, 196, 190)
+    az[300:322] = (200, 28, 38)  # franja roja a 1,2 m del suelo
+    az[440:] = np.array([84, 82, 80]) + rng.normal(0, 5, (72, 256))[..., None]  # zócalo de granito oscuro
+    out["vi_metro_azulejo"] = az
+    su = np.full((256, 256, 3), (150, 148, 144), np.float32) + rng.normal(0, 9, (256, 256))[..., None]
+    su += ruido(256, 8, 8)[..., None]
+    su[::64] -= 22
+    su[:, ::64] -= 22
+    out["vi_metro_suelo"] = su
     res = {}
     for k, a in out.items():
         modo = "RGBA" if a.shape[2] == 4 else "RGB"
