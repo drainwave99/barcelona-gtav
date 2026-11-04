@@ -24,6 +24,8 @@ import texturas_fachada
 
 PASO = 2.0  # muestreo del eje (m)
 ENTRE_PILAS = 30.0
+ASFALTO = 0.04  # el asfalto de calles_v va 4 cm sobre el terreno (SUBE["vi_asfalto"])
+LLEGADA = 12.0  # m en que el tablero se acerca a la calle a la que llega
 GALIBO_BAJO = 5.0  # de la calzada de abajo a la cara inferior del puente que la cruza por encima
 RAPIDAS = {"motorway", "trunk"}
 ENLACES = {"motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link"}
@@ -539,7 +541,57 @@ def perfil(via, relieve, por_suelo=True, encima=None):
         if np.isfinite(techo).any():  # rampa del 8 % hasta el tramo de debajo, sin escalones
             env = (np.where(np.isfinite(techo), techo, 1e6)[None, :] + 0.08 * np.abs(ds[:, None] - ds[None, :])).min(1)
             z = np.minimum(z, env)
+    # estribos: el tablero acaba justo a la altura del asfalto de la calle a la que llega (suelo + SUBE de calles_v)
+    # y se acerca a ella en LLEGADA m sin escalón; la envolvente del terreno de los lados lo subía hasta 0,6 m y
+    # quedaba un bordillo de tablero en mitad de la calzada (marcas 191029 y 182625)
+    for k, interno in zip((0, -1), via["internos"]):
+        if interno or not np.isnan(medida[k]):
+            continue
+        # el suelo de la calle 3 m más allá del extremo (en el propio extremo el terreno corregido puede ser el
+        # hoyo de debajo del tablero: en Carrer Argentina quedaba 4,9 m por debajo de la calle)
+        fuera = pts[0] - (pts[1] - pts[0]) if k == 0 else pts[-1] + (pts[-1] - pts[-2])
+        t_ = fuera - pts[k]
+        q = pts[k] + t_ / (np.linalg.norm(t_) + 1e-9) * 3.0
+        s_fuera = float(relieve.valor("suelo", q[0], q[1]))
+        objetivo = (s_fuera if np.isfinite(s_fuera) else suelo[k]) + ASFALTO
+        lejos = ds - ds[0] if k == 0 else ds[-1] - ds
+        peso = np.clip(lejos / LLEGADA, 0.0, 1.0)
+        peso = peso * peso * (3 - 2 * peso)  # suave en los dos lados
+        cerca = lejos < LLEGADA
+        z[cerca] = objetivo + (z[cerca] - objetivo) * peso[cerca]
     return pts, der, ds, z, suelo
+
+
+def plantas_bajas(vias, caja, alto=2.5):
+    """Planta (UTM) de los tramos de tablero de calzada que van a menos de alto m del suelo, dentro de caja: ahí
+    no puede haber además calle a nivel ni terreno a la vista (se cruzaban con el tablero: saltos, parpadeo y el
+    tablero 'fundido' con el terreno). Necesita los perfiles hechos (perfiles())."""
+    import shapely
+    from shapely.geometry import box
+    zona = box(*caja)
+    trozos = []
+    for via in vias:
+        r = _PERFILES.get(id(via))
+        if r is None or via["s"]["tipo"] not in ("autopista", "calle"):
+            continue
+        pts, der, ds, z, suelo = r
+        if pts[:, 0].max() < caja[0] - 30 or pts[:, 0].min() > caja[2] + 30 or pts[:, 1].max() < caja[1] - 30 or                 pts[:, 1].min() > caja[3] + 30:
+            continue
+        bajo = z - suelo < alto
+        if not bajo.any():
+            continue
+        w = via["s"]["ancho"] / 2
+        lab, n = ndimage.label(bajo)
+        for k in range(1, n + 1):
+            idx = np.flatnonzero(lab == k)
+            i0, i1 = max(idx[0] - 1, 0), min(idx[-1] + 1, len(pts) - 1)
+            if i1 <= i0:
+                continue
+            trozos.append(LineString(pts[i0:i1 + 1]).buffer(w, cap_style="flat"))
+    if not trozos:
+        return None
+    g = shapely.union_all(trozos).intersection(zona.buffer(5))
+    return None if g.is_empty else g
 
 
 class Obra:
@@ -752,6 +804,17 @@ def tramos(pts, caja):
             k = j + 1
         else:
             k += 1
+    return out
+
+
+def cerca(vias, caja, margen=600.0):
+    """Las vías puente con algún punto a menos de margen m de la caja (e0, n0, e1, n1): las que pueden tocar la hoja
+    o pasar por encima de alguna que la toca. Calcular los perfiles de todas cargaría el LiDAR de todo el mapa."""
+    out = []
+    for v in vias:
+        xy = v["xy"]
+        if xy[:, 0].max() >= caja[0] - margen and xy[:, 0].min() < caja[2] + margen and                 xy[:, 1].max() >= caja[1] - margen and xy[:, 1].min() < caja[3] + margen:
+            out.append(v)
     return out
 
 

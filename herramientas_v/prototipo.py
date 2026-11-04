@@ -589,6 +589,9 @@ def main():
         puentes_v.extremos_internos(puentes, osm)  # con todos: un tramo que sigue en otra vía no baja al suelo
         del osm
     relieve = puentes_v.Relieve()
+    if puentes:  # todos los perfiles de una vez (con los puentes que pasan por encima): calles y tableros, la misma altura
+        puentes = puentes_v.cerca(puentes, (e0h, n1h - 1000, e0h + 1000, n1h))
+        puentes_v.perfiles(puentes, relieve)
     rapidas = vias_rapidas(osm_hoja)  # trincheras de hormigón junto a ellas (separar_muros)
     xml = SALIDA / "xml"
     shutil.rmtree(SALIDA, ignore_errors=True)
@@ -635,7 +638,8 @@ def main():
                 k = int(CASILLA / PASO) + 1
                 suelo_calles = calles_v.construir(osm_hoja, [vv["poli"] for vv in vecinos], v[:, 2].reshape(k, k),
                                                   e0, n0, CASILLA, PASO, cubierto, hoyos_casilla(capas, e0h, n1h, e0, n0),
-                                                  bocas)
+                                                  bocas, puentes_v.plantas_bajas(puentes, (e0, n0, e0 + CASILLA, n0 + CASILLA))
+                                                  if puentes else None)
                 if suelo_calles:
                     rage.escribir_ydr(xml / f"bcn_c_{nombre}.ydr.xml", f"bcn_c_{nombre}",
                                       [dict(textura=t, recorte=t.endswith("_alfa"), **trozo) for t, g in suelo_calles.items() for trozo in partir(g)],

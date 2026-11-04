@@ -222,6 +222,7 @@ def construir(osm, capas, e0h, n1h):
     rel = puentes_v.Relieve()
     todas_p = puentes_v.vias_puente(osm)
     puentes_v.extremos_internos(todas_p, osm)
+    todas_p = puentes_v.cerca(todas_p, (e0h, n1h - 1000, e0h + 1000, n1h))
     puentes_v._PERFILES.clear()  # los id de otra llamada no valen
     perfiles_p = puentes_v.perfiles(todas_p, rel)
     for via, r in zip(todas_p, perfiles_p):

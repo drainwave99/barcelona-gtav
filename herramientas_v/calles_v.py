@@ -458,11 +458,13 @@ def _tapas(vias, calzada, casilla):
     return centros, ejes
 
 
-def construir(osm, edificios, z, e0, n0, lado, paso, cubierto=None, hoyos=None, bocas=None):
+def construir(osm, edificios, z, e0, n0, lado, paso, cubierto=None, hoyos=None, bocas=None, tapado=None):
     """edificios: lista de Polygon (UTM) del Catastro alrededor de la casilla. cubierto: si es una lista, se le
     añade lo que tapan calzada, aceras y aparcamientos (para hundir ahí el terreno que se ve). hoyos: hoyos del
     terreno ya rellenados (rampas de parking): se pavimentan como aparcamiento. bocas: si es una lista, se le
-    añaden las bocas de metro de la casilla (dict x, y, z, eje, lat) para bocas_v (escalera y vestíbulo en 3D)."""
+    añaden las bocas de metro de la casilla (dict x, y, z, eje, lat) para bocas_v (escalera y vestíbulo en 3D).
+    tapado: planta de los tableros que van pegados al suelo (puentes_v.plantas_bajas): ahí manda el tablero, sin
+    calle a nivel debajo, y el terreno se hunde como bajo las calles."""
     marco = 30.0
     caja = (e0 - marco, n0 - marco, e0 + lado + marco, n0 + lado + marco)
     casilla = box(e0, n0, e0 + lado, n0 + lado)
@@ -511,8 +513,11 @@ def construir(osm, edificios, z, e0, n0, lado, paso, cubierto=None, hoyos=None, 
     if rect_bocas:  # el hueco de la escalera del metro: sin calle encima
         hueco = shapely.union_all([bocas_v.rectangulo(b) for b in rect_bocas])
         calzada, aparc, acera, pintura = (g.difference(hueco) for g in (calzada, aparc, acera, pintura))
+    if tapado is not None and not tapado.is_empty:
+        calzada, aparc, acera, pintura = (g.difference(tapado) for g in (calzada, aparc, acera, pintura))
     if cubierto is not None:
-        cubierto.append(shapely.union_all([calzada, aparc, acera]).intersection(casilla.buffer(paso)))
+        cubierto.append(shapely.union_all([calzada, aparc, acera] + ([tapado] if tapado is not None else []))
+                        .intersection(casilla.buffer(paso)))
     out = {}
     capas = (("vi_asfalto", calzada, (0.80, 0.16, 0.06)), ("vi_aparcamiento", aparc, (0.86, 0.10, 0.05)),
              ("vi_acera", acera, (0.88, 0.10, 0.04)), ("vi_linea", pintura, (0.88, 0.08, 0.06)))
