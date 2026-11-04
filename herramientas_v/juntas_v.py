@@ -6,7 +6,7 @@ import pickle, sys
 import numpy as np
 import shapely
 from shapely.geometry import LineString, Point
-sys.path.insert(0, r"C:\Users\danny\Desktop\GTA SAN ANDREAS MOD CON ISMA\herramientas_v")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
 import config_v, puentes_v, calles_v
 osm = pickle.load(open(config_v.DATOS / "osm.pkl", "rb"))
 rel = puentes_v.Relieve()

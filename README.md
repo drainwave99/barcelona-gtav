@@ -10,6 +10,15 @@ Sustituye a Los Santos: el juego arranca directamente en Barcelona, en un modo l
 
 Este repositorio contiene **solo las herramientas** que generan el mapa. No contiene archivos de Rockstar ni el mapa ya generado, que ocupa unos 15 GB y se puede rehacer.
 
+**Proyecto aparcado el 2026-11-04.** En qué estado queda y qué faltaba está en [`ESTADO.md`](ESTADO.md).
+
+| | |
+|---|---|
+| ![Viaducto de la C-31 en Sant Roc](capturas/viaducto_sant_roc.jpg) | ![Puente sobre la Autopista del Maresme en Badalona](capturas/puente_badalona.jpg) |
+| Viaducto de la C-31 en Sant Roc (Badalona) | Puente sobre la Autopista del Maresme (el Raval, Badalona) |
+| ![Boca de metro en el carrer de Mallorca](capturas/metro_escalera.jpg) | ![Vestíbulo de la boca de metro](capturas/metro_vestibulo.jpg) |
+| Boca de metro en el carrer de Mallorca (Sagrada Família) | El vestíbulo al bajar la escalera |
+
 ## Qué hace cada parte
 
 | Herramienta | Qué hace |
