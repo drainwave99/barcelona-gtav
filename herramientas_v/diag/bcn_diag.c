@@ -167,6 +167,12 @@ static void comprobar_lista(void)
         uint32_t m = hash(n);
         snprintf(t, sizeof t, "MODELO %s en_imagen=%d valido=%d", n, en_imagen(m), valido(m));
         if (registro) { fprintf(registro, "%s\n", t); fflush(registro); }
+        if (valido(m)) {  /* caja del modelo (GET_MODEL_DIMENSIONS): hacia dónde sale el brazo de una farola */
+            float mn[6] = {0}, mx[6] = {0};  /* Vector3 del juego: x, relleno, y, relleno, z, relleno */
+            sh_init(0x03E8D3D5F549087AULL); pi(m); pp(mn); pp(mx); llamar();
+            snprintf(t, sizeof t, "CAJA %s min %.2f %.2f %.2f max %.2f %.2f %.2f", n, mn[0], mn[2], mn[4], mx[0], mx[2], mx[4]);
+            if (registro) { fprintf(registro, "%s\n", t); fflush(registro); }
+        }
     }
     fclose(f);
 }
