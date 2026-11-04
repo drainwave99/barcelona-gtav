@@ -1,7 +1,7 @@
 """Árboles y mobiliario urbano con los props del propio juego, en su sitio real.
 
 Posiciones: OpenStreetMap (ODbL): natural=tree (30 000 en las hojas, casi todos del inventario municipal),
-highway=street_lamp, traffic_signals y bus_stop, amenity=bench, waste_basket, recycling, post_box,
+highway=street_lamp, traffic_signals, stop, give_way y bus_stop, amenity=bench, waste_basket, recycling, post_box,
 bicycle_parking y drinking_water. Árboles de parques y montes que OSM no tiene: máximos locales de la
 copa en el LiDAR (clases 3-5). Altura de cada árbol: LiDAR (copa menos suelo); el prop se escala a ella.
 
@@ -25,6 +25,8 @@ import config_v
 PROPS = {
     "farola": ["prop_streetlight_01", "prop_streetlight_03", "prop_streetlight_01b"],
     "semaforo": ["prop_traffic_01a", "prop_traffic_03a", "prop_traffic_01b"],
+    "stop": ["prop_sign_road_01a"],
+    "ceda": ["prop_sign_road_02a"],  # si el juego lo tiene (lo apunta bcn_diag en props_validos.txt)
     "banco": ["prop_bench_01a", "prop_bench_05", "prop_bench_02"],
     "papelera": ["prop_bin_07a", "prop_bin_01a", "prop_bin_05a"],
     "contenedor": ["prop_recyclebin_04a", "prop_dumpster_01a", "prop_recyclebin_01a"],
@@ -43,7 +45,7 @@ PROPS = {
 ALTURA_PROP = {"palmera": 9.0, "pino": 14.0, "cipres": 11.0, "frondoso": 13.0, "jacaranda": 12.0}
 CIUDAD_QUEDAN = 3  # de cada 40 árboles en la ciudad (2026-11-04: eran 3 de 10 y aún sobraban; un 75 % menos)
 FAROLAS_CADA = 60.0  # m entre farolas que OSM no tiene (eran 30: la mitad)
-DIST = {"arbol": 350.0, "farola": 250.0, "semaforo": 200.0, "otro": 120.0}
+DIST = {"arbol": 350.0, "farola": 250.0, "semaforo": 200.0, "senal": 150.0, "otro": 120.0}
 SUBE_ACERA = 0.13  # como la acera de calles_v
 
 
@@ -298,6 +300,22 @@ def construir(osm, capas, e0h, n1h):
                 p = q - tan * sentido * 3.0 + der * sentido * (w / 2 + 0.6)
                 poner("semaforo", p[0], p[1], z_suelo(*p) + SUBE_ACERA, rumbo_hacia(p[0], p[1], p - tan * sentido * 10),
                       DIST["semaforo"])
+        elif hw in ("stop", "give_way"):
+            # señal de STOP / ceda el paso: el nodo está en la calzada antes del cruce; el poste a la derecha
+            # de quien llega al cruce (el extremo más cercano de la calle), mirando hacia él
+            v = via_cercana(x, y, 8.0)
+            if v is None:
+                continue
+            q, tan, w, tv = v
+            linea = vias[arbol_vias.nearest(Point(x, y))][0]
+            d = linea.project(Point(x, y))
+            sentido = 1.0 if linea.length - d < d else -1.0  # 1: va hacia el final de la línea
+            if tv.get("oneway") in ("yes", "1", "-1"):  # de sentido único: el de la calle
+                sentido = -1.0 if tv.get("oneway") == "-1" else 1.0
+            der = np.array([tan[1], -tan[0]])
+            p = q + der * sentido * (w / 2 + 0.5)
+            poner("stop" if hw == "stop" else "ceda", p[0], p[1], z_suelo(*p) + SUBE_ACERA,
+                  rumbo_hacia(p[0], p[1], p - tan * sentido * 10), DIST["senal"])
         elif hw == "bus_stop" or am in ("bench", "waste_basket", "recycling", "post_box", "bicycle_parking",
                                         "drinking_water"):
             papel = {"bench": "banco", "waste_basket": "papelera", "recycling": "contenedor", "post_box": "buzon",
