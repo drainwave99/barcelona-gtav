@@ -46,6 +46,26 @@ def preparar_cacheado(osm, relieve):
     return tuneles
 
 
+def _bajo_tierra(xy, relieve, cubierta=3.5):
+    """Túnel corto bajo tierra de verdad (la Ronda Litoral bajo la plaça de Monterrey, 68 m): el suelo de encima,
+    en la mitad central, está más de 'cubierta' m por encima de las dos bocas. Los cortos bajo un viaducto o un
+    edificio (Sant Roc, bajo la C-31) tienen encima el suelo a la cota de la calle y siguen a nivel."""
+    linea = LineString(xy)
+    L = linea.length
+    medio = np.array([linea.interpolate(d).coords[0] for d in np.linspace(0.3 * L, 0.7 * L, 9)])
+    arriba = relieve.valor("suelo", medio[:, 0], medio[:, 1])
+    bocas = []
+    for extremo, interior in ((0, 1), (-1, -2)):
+        p, q = xy[extremo], xy[interior]
+        fuera_dir = (p - q) / (np.linalg.norm(p - q) + 1e-9)
+        m = np.array([p + fuera_dir * d for d in (2.0, 6.0, 10.0)])
+        bocas.append(relieve.valor("suelo", m[:, 0], m[:, 1]))
+    bocas = np.concatenate(bocas)
+    if not np.isfinite(arriba).sum() >= 5 or not np.isfinite(bocas).any():
+        return False
+    return float(np.nanmedian(arriba)) > float(np.nanmax(bocas)) + cubierta
+
+
 def preparar(osm, relieve, caja=None):
     """Túneles de coche de OSM con su eje muestreado y la z de la calzada."""
     tuneles, nodos_fuera = [], set()
@@ -75,7 +95,7 @@ def preparar(osm, relieve, caja=None):
     for tu in tuneles:
         L = LineString(tu["xy"]).length
         sigue = any(grado.get(_clave(p), 0) > 1 for p in (tu["xy"][0], tu["xy"][-1]))
-        if L >= LARGO_MIN or (sigue and L >= 20):
+        if L >= LARGO_MIN or (sigue and L >= 20) or (L >= 20 and _bajo_tierra(tu["xy"], relieve)):
             largos.append(tu)
     tuneles = largos
     # z en los vértices: en las bocas, el suelo de la trinchera; dentro, interpolación por la red de túneles

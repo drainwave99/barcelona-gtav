@@ -586,7 +586,7 @@ def main():
                                   round(float(t["xy"][-1][0]), 1), round(float(t["xy"][-1][1]), 1)) for t in tuneles)
         pasos = pasajes(osm_hoja)
         puentes = puentes_v.vias_puente(osm)
-        puentes_v.extremos_internos(puentes)  # con todos: un tramo que sigue en otra vía no baja al suelo
+        puentes_v.extremos_internos(puentes, osm)  # con todos: un tramo que sigue en otra vía no baja al suelo
         del osm
     relieve = puentes_v.Relieve()
     rapidas = vias_rapidas(osm_hoja)  # trincheras de hormigón junto a ellas (separar_muros)
@@ -707,8 +707,10 @@ def main():
             aqui = [v for v in puentes if v["xy"][:, 0].max() >= e0 - 5 and v["xy"][:, 0].min() < e0 + CASILLA + 5
                     and v["xy"][:, 1].max() >= n0 - 5 and v["xy"][:, 1].min() < n0 + CASILLA + 5]
             if aqui:
+                a_nivel = [(l, w) for l, _, w in calles_v.vias_coche(osm_hoja, (e0 - 30, n0 - 30, e0 + CASILLA + 30,
+                                                                                  n0 + CASILLA + 30))] if osm_hoja else None
                 obra, col, hechos = puentes_v.construir(aqui, relieve, calles, (e0 + CASILLA / 2, n0 + CASILLA / 2),
-                                                        caja)
+                                                        caja, a_nivel)
                 if hechos:
                     geos = [dict(textura=t, recorte=t.endswith("_alfa"), **trozo) for t, g in obra.items()
                             for trozo in partir(g)]

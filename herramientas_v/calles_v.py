@@ -73,6 +73,12 @@ def _a_nivel(t, largo=0.0):
 EN_TUNEL = set()  # extremos de las vías que van en un tubo de tuneles_v (no se dibujan a nivel)
 
 
+def _es_puente_inferido(osm, xy):
+    """Calzada sin bridge=yes que va sobre un tablero (puentes_v.inferidos): la hace puentes_v, no va a nivel."""
+    import puentes_v
+    return puentes_v._clave_via(xy) in puentes_v.inferidos(osm)
+
+
 def vias_coche(osm, caja):
     """[(LineString, tags, ancho)] de las vías con calzada a nivel que tocan la caja."""
     out = []
@@ -85,6 +91,8 @@ def vias_coche(osm, caja):
                          round(float(xy[-1][0]), 1), round(float(xy[-1][1]), 1)) in EN_TUNEL:
             continue
         if not _a_nivel(t, float(np.linalg.norm(np.diff(xy, axis=0), axis=1).sum())):
+            continue
+        if _es_puente_inferido(osm, xy):
             continue
         if xy[:, 0].max() < caja[0] or xy[:, 0].min() > caja[2] or xy[:, 1].max() < caja[1] or xy[:, 1].min() > caja[3]:
             continue

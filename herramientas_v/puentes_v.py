@@ -24,6 +24,7 @@ import texturas_fachada
 
 PASO = 2.0  # muestreo del eje (m)
 ENTRE_PILAS = 30.0
+GALIBO_BAJO = 5.0  # de la calzada de abajo a la cara inferior del puente que la cruza por encima
 RAPIDAS = {"motorway", "trunk"}
 ENLACES = {"motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link"}
 URBANAS = {"primary", "secondary", "tertiary", "residential", "unclassified", "living_street", "service", "road"}
@@ -53,6 +54,8 @@ def _huella_puentes(clave):
         t = v["tags"]
         if t.get("highway") not in RAPIDAS | {"motorway_link", "trunk_link"} or t.get("bridge") not in (None, "no"):
             continue
+        if len(v["xy"]) >= 2 and _clave_via(v["xy"]) in inferidos(osm):
+            continue
         xy = np.asarray(v["xy"], float)
         if len(xy) < 2 or xy[:, 0].max() < e0 - 50 or xy[:, 0].min() > e0 + 1050 or \
                 xy[:, 1].max() < n1 - 1050 or xy[:, 1].min() > n1 + 50:
@@ -60,6 +63,35 @@ def _huella_puentes(clave):
         s = seccion(t)
         ancho = int(round((s["ancho"] / 2 + 2.0) / 0.5))
         dib.line([((x - e0) / 0.5, (n1 - y) / 0.5) for x, y in xy], fill=0, width=2 * ancho, joint="curve")
+    return np.asarray(img) > 0
+
+
+def _estribos(clave):
+    """Máscara (2000, 2000) de los estribos: círculos de ancho/2 + 1 m en los extremos de puente donde empieza una
+    calzada a nivel. Ahí el terraplén de la rampa es suelo de verdad aunque sobresalga del terreno de los lados
+    (en el Pont dels Passadors la corrección lo bajaba 1,7 m y la calle se hundía en un hoyo al llegar al puente)."""
+    import pickle
+    import calles_v
+    with open(config_v.DATOS / "osm.pkl", "rb") as fh:
+        osm = pickle.load(fh)
+    e0, n1 = int(clave[:3]) * 1000, (4000 + int(clave[3:]) + 1) * 1000
+    finales = set()
+    extra = inferidos(osm)
+    for w in osm["vias"]:
+        t = w["tags"]
+        if t.get("highway") in calles_v.CARRILES and len(w["xy"]) >= 2 and calles_v._a_nivel(t) and                 t.get("tunnel") in (None, "no") and _clave_via(w["xy"]) not in extra:
+            for q in (w["xy"][0], w["xy"][-1]):
+                finales.add((round(float(q[0]), 1), round(float(q[1]), 1)))
+    img = Image.new("L", (2000, 2000), 0)
+    dib = ImageDraw.Draw(img)
+    for v in vias_puente(osm, (e0 - 200, n1 - 1200, e0 + 1200, n1 + 200)):
+        if v["tags"].get("railway") or v["s"]["tipo"] == "pasarela":
+            continue
+        for q in (v["xy"][0], v["xy"][-1]):
+            if (round(float(q[0]), 1), round(float(q[1]), 1)) in finales:
+                r = (v["s"]["ancho"] / 2 + 1.0) / 0.5
+                c, f = (q[0] - e0) / 0.5, (n1 - q[1]) / 0.5
+                dib.ellipse([c - r, f - r, c + r, f + r], fill=255)
     return np.asarray(img) > 0
 
 
@@ -96,13 +128,13 @@ def hoja_corregida(clave):
             rell = np.where(fijo, rell, media)
         alrededor = np.kron(rell, np.ones((f, f), np.float32))
         alrededor = np.pad(alrededor, ((0, suelo.shape[0] - alrededor.shape[0]), (0, suelo.shape[1] - alrededor.shape[1])), mode="edge")
-        alto = huella & (suelo - alrededor > 2.5)
+        alto = huella & (suelo - alrededor > 2.5) & ~_estribos(clave)
         alto = ndimage.binary_opening(alto, iterations=2)  # nada de píxeles sueltos
         if alto.any():
             puente = capas["puente"].astype(np.float32)
             puente[alto] = np.fmax(puente[alto], suelo[alto])
             # el borde del tablero falso (los 2 px del talud vertical) también baja
-            borde = ndimage.binary_dilation(alto, iterations=3) & huella & (suelo - alrededor > 1.0)
+            borde = ndimage.binary_dilation(alto, iterations=3) & huella & (suelo - alrededor > 1.0) & ~_estribos(clave)
             suelo[alto | borde] = alrededor[alto | borde]
             capas["suelo"], capas["puente"] = suelo, puente
     capas["suelo"] = _sin_picos(_calles_sin_muros(capas["suelo"].astype(np.float32), clave))
@@ -174,7 +206,7 @@ def _calles_sin_muros(suelo, clave):
     return suelo
 
 
-VERSION_CORRECCION = 1793463400  # sube si cambia hoja_corregida (fecha unix): rehace las _c.npz
+VERSION_CORRECCION = 1793743271  # sube si cambia hoja_corregida (fecha unix): rehace las _c.npz
 
 
 class Relieve:
@@ -245,11 +277,86 @@ def seccion(t):
     return s
 
 
-def vias_puente(osm, caja=None):
-    """Vías de OSM que son puente (con su sección), opcionalmente dentro de caja (e0, n0, e1, n1)."""
-    out = []
+def _clave_via(xy):
+    return (round(float(xy[0][0]), 1), round(float(xy[0][1]), 1), round(float(xy[-1][0]), 1), round(float(xy[-1][1]), 1))
+
+
+_INFERIDOS = None
+VERSION_INFERIDOS = 1  # sube si cambia la regla de _inferidos
+
+
+def inferidos(osm=None):
+    """Puentes sin bridge=yes en OSM: calzadas 'a nivel' de menos de 120 m que empalman con un puente y que en el
+    LiDAR (sin corregir) van al menos en un 30 % de su largo más de 3 m por encima del suelo, sobre el tablero.
+    En la Ronda Litoral sobre la trinchera de Manuel Fernández Márquez la calzada se pegaba al terreno y bajaba al
+    fondo; en el Nus de la Trinitat, igual. Devuelve {clave_via: tags}; se guarda en datos_v/puentes_inferidos.pkl."""
+    global _INFERIDOS
+    if _INFERIDOS is not None:
+        return _INFERIDOS
+    import pickle
+    import calles_v
+    ruta = config_v.DATOS / "puentes_inferidos.pkl"
+    fuente = config_v.DATOS / "osm.pkl"
+    if ruta.exists() and ruta.stat().st_mtime > fuente.stat().st_mtime:
+        with open(ruta, "rb") as fh:
+            guardado = pickle.load(fh)
+        if guardado.get("version") == VERSION_INFERIDOS:
+            _INFERIDOS = guardado["vias"]
+            return _INFERIDOS
+    with open(fuente, "rb") as fh:  # siempre con el OSM entero (a veces llega uno recortado a la hoja)
+        osm = pickle.load(fh)
+    extremos = set()
+    for v in vias_puente(osm, con_inferidos=False):
+        for p in (v["xy"][0], v["xy"][-1]):
+            extremos.add((round(float(p[0]), 1), round(float(p[1]), 1)))
+    hojas = {}
+
+    def bruto(capa, e, n):
+        out = np.full(len(e), np.nan)
+        for i, (x, y) in enumerate(zip(e, n)):
+            k = f"{int(x // 1000)}{int(y // 1000) - 4000:03d}"
+            if k not in hojas:
+                r = config_v.DATOS / "lidar" / "hojas" / f"{k}.npz"
+                hojas[k] = {c: d for c, d in np.load(r).items() if c in ("suelo", "puente")} if r.exists() else None
+            h = hojas[k]
+            if h is not None:
+                out[i] = h[capa][int(((int(y // 1000) + 1) * 1000 - y) / 0.5), int((x - int(x // 1000) * 1000) / 0.5)]
+        return out
+    encontrados = {}
     for v in osm["vias"]:
         t = v["tags"]
+        if t.get("highway") not in calles_v.CARRILES or not calles_v._a_nivel(t) or t.get("tunnel") not in (None, "no"):
+            continue
+        xy = np.asarray(v["xy"], float)
+        if len(xy) < 2 or not any((round(float(p[0]), 1), round(float(p[1]), 1)) in extremos for p in (xy[0], xy[-1])):
+            continue
+        linea = LineString(xy)
+        if linea.length > 120:
+            continue
+        d = np.arange(1, linea.length, 2.0)
+        if len(d) < 3:
+            continue
+        p = np.array([linea.interpolate(x).coords[0] for x in d])
+        su, pu = bruto("suelo", p[:, 0], p[:, 1]), bruto("puente", p[:, 0], p[:, 1])
+        if (np.isfinite(pu) & (pu - su > 3.0)).mean() >= 0.3:
+            encontrados[_clave_via(xy)] = dict(t, bridge="yes", bcn_inferido="1")
+    tmp = ruta.with_suffix(f".{config_v.os.getpid()}.tmp")
+    with open(tmp, "wb") as fh:
+        pickle.dump(dict(version=VERSION_INFERIDOS, vias=encontrados), fh)
+    config_v.os.replace(tmp, ruta)
+    _INFERIDOS = encontrados
+    return encontrados
+
+
+def vias_puente(osm, caja=None, con_inferidos=True):
+    """Vías de OSM que son puente (con su sección), opcionalmente dentro de caja (e0, n0, e1, n1). Con
+    con_inferidos, también los puentes sin etiqueta que se ven en el LiDAR (inferidos)."""
+    out = []
+    extra = inferidos(osm) if con_inferidos else {}
+    for v in osm["vias"]:
+        t = v["tags"]
+        if extra and len(v["xy"]) >= 2 and t.get("bridge") in (None, "no"):
+            t = extra.get(_clave_via(v["xy"]), t)
         if t.get("bridge") in (None, "no") or len(v["xy"]) < 2:
             continue
         if t.get("name") == "Pont del Petroli":
@@ -268,16 +375,31 @@ def vias_puente(osm, caja=None):
     return out
 
 
-def extremos_internos(vias):
-    """Para cada vía, si su inicio / final empalma con otra vía de puente (entonces no apoya en el suelo)."""
+def extremos_internos(vias, osm=None):
+    """Para cada vía, si su inicio / final empalma con otra vía de puente (entonces no apoya en el suelo).
+    Con osm: si en ese extremo empieza también una calzada a nivel, el puente sí llega al suelo aunque lo toque
+    otro puente (en la Ronda Litoral de Sant Adrià el tronco y el ramal se juntan justo donde la Ronda sigue a
+    nivel: el tablero se quedaba a 2 m y las barreras cruzaban la calzada)."""
     cuenta = {}
     for v in vias:
         for p in v["xy"]:
             k = (round(p[0], 1), round(p[1], 1))
             cuenta[k] = cuenta.get(k, 0) + 1
+    suelo = set()
+    if osm is not None:
+        import calles_v
+        extra = inferidos(osm)
+        for w in osm["vias"]:
+            t = w["tags"]
+            if t.get("highway") in calles_v.CARRILES and len(w["xy"]) >= 2 and calles_v._a_nivel(t) and                     t.get("tunnel") in (None, "no") and _clave_via(w["xy"]) not in extra:
+                for p in (w["xy"][0], w["xy"][-1]):
+                    suelo.add((round(float(p[0]), 1), round(float(p[1]), 1)))
+
+    def interno(p):
+        k = (round(float(p[0]), 1), round(float(p[1]), 1))
+        return cuenta[k] > 1 and k not in suelo
     for v in vias:
-        a, b = v["xy"][0], v["xy"][-1]
-        v["internos"] = (cuenta[(round(a[0], 1), round(a[1], 1))] > 1, cuenta[(round(b[0], 1), round(b[1], 1))] > 1)
+        v["internos"] = (interno(v["xy"][0]), interno(v["xy"][-1]))
 
 
 def _sin_islas(ds, medida, suelo, isla=25.0, hueco_min=20.0, sobre=3.0):
@@ -342,8 +464,11 @@ def _tramos_a_ras(ds, medida, suelo, largo_min=30.0):
     return out
 
 
-def perfil(via, relieve, por_suelo=True):
-    """Eje muestreado: puntos (N, 2), derecha (N, 2), distancia (N), z del tablero (N), suelo (N)."""
+def perfil(via, relieve, por_suelo=True, encima=None):
+    """Eje muestreado: puntos (N, 2), derecha (N, 2), distancia (N), z del tablero (N), suelo (N).
+    encima: [(planta, puntos, z, canto)] de los puentes de capa superior que lo cruzan: debajo de ellos el tablero
+    va al menos GALIBO_BAJO m por debajo del suyo (el LiDAR solo ve el de arriba: el Ramal Besòs bajo la Ronda
+    Litoral salía a la altura de la Ronda, con los pretiles cruzando la calzada)."""
     linea = LineString(via["xy"])
     largo = linea.length
     if largo < 3:
@@ -402,6 +527,18 @@ def perfil(via, relieve, por_suelo=True):
         extremos = z[[0, -1]]
         z = np.maximum(ndimage.uniform_filter1d(z, 11, mode="nearest"), minimo - 0.1)
         z[[0, -1]] = extremos
+    if encima:
+        import shapely
+        techo = np.full(len(z), np.inf)
+        puntos = shapely.points(pts)
+        for planta, p_o, z_o, canto_o in encima:
+            dentro = shapely.contains(planta, puntos)
+            for i in np.flatnonzero(dentro):
+                k = np.argmin(((p_o - pts[i]) ** 2).sum(1))
+                techo[i] = min(techo[i], z_o[k] - canto_o - GALIBO_BAJO)
+        if np.isfinite(techo).any():  # rampa del 8 % hasta el tramo de debajo, sin escalones
+            env = (np.where(np.isfinite(techo), techo, 1e6)[None, :] + 0.08 * np.abs(ds[:, None] - ds[None, :])).min(1)
+            z = np.minimum(z, env)
     return pts, der, ds, z, suelo
 
 
@@ -488,16 +625,22 @@ def _tablero(obra, eje, s):
 
 
 def _barreras(obra, eje, s, otras=None):
-    """otras: función (xy (N, 2), z (N)) -> máscara de los puntos que caen en el tablero de otra vía."""
+    """otras: función (xy (N, 2), fuera (N, 2), z (N)) -> máscara de los tramos de barrera que sobran: los que
+    caen en el tablero de otra vía o los que tienen justo por fuera más calzada a su altura (otro tablero al lado
+    o la calle a nivel donde el puente arranca del suelo; salían New Jersey cruzando los carriles)."""
     w = s["ancho"] / 2
     for lado in (-1, 1):  # perfil desde el borde exterior hacia dentro, a la izquierda (-1) o derecha (+1)
         quitar = None
-        if otras is not None and s["barrera"] == "jersey":
+        if otras is not None and s["barrera"] in ("jersey", "pretil"):
             pts, der, ds, z = eje
-            medio = (pts[:-1] + pts[1:]) / 2 + (der[:-1] + der[1:]) / 2 * lado * (w - 0.3)
-            quitar = otras(medio, (z[:-1] + z[1:]) / 2)
+            m_pts, m_der = (pts[:-1] + pts[1:]) / 2, (der[:-1] + der[1:]) / 2
+            quitar = otras(m_pts + m_der * lado * (w - 0.3), m_pts + m_der * lado * (w + 0.8), (z[:-1] + z[1:]) / 2)
             if quitar.any():  # sin trocitos de barrera sueltos
                 quitar = ndimage.binary_closing(quitar, iterations=2) | quitar
+                trozos, n = ndimage.label(~quitar)  # y los cachitos de menos de 6 m que quedan en las puntas
+                for k in range(1, n + 1):
+                    if (trozos == k).sum() * PASO < 6.0:
+                        quitar[trozos == k] = True
         if s["barrera"] == "jersey":
             hacia_dentro = [(0, 0.81), (0.15, 0.81), (0.23, 0.33), (0.38, 0.08), (0.6, 0.0)]
             frente = [(0.0, 0.0)] + hacia_dentro
@@ -612,40 +755,79 @@ def tramos(pts, caja):
     return out
 
 
-def construir(vias, relieve, calles, centro, caja=None):
-    """vias: de vias_puente (con 'internos'); calles: STRtree de calles a nivel (o None);
+def perfiles(vias, relieve):
+    """Perfil de cada vía (en _PERFILES, por id) con los puentes de capa más alta que la cruzan por encima: primero
+    los de arriba, que los de debajo miran. Lo usan construir y las farolas de mobiliario_v (mismo tablero)."""
+    capa = {id(v): _numero(v["tags"].get("layer"), 1) for v in vias}
+    for via in sorted(vias, key=lambda v: -capa[id(v)]):
+        clave = id(via)
+        if clave not in _PERFILES:
+            encima = []
+            linea = LineString(via["xy"])
+            for otra in vias:
+                r = _PERFILES.get(id(otra))
+                if capa[id(otra)] > capa[clave] and r is not None and otra["s"]["tipo"] != "pasarela":
+                    planta = LineString(r[0]).buffer(otra["s"]["ancho"] / 2 + 1.0, cap_style="flat")
+                    if planta.intersects(linea):
+                        encima.append((planta, r[0], r[3], otra["s"]["canto"]))
+            _PERFILES[clave] = perfil(via, relieve, encima=encima)
+    return [_PERFILES[id(v)] for v in vias]
+
+
+def construir(vias, relieve, calles, centro, caja=None, a_nivel=None):
+    """vias: de vias_puente (con 'internos'); calles: STRtree de calles a nivel (o None); a_nivel: [(LineString,
+    ancho)] de las calzadas a nivel cercanas (para quitar las barreras donde la calle sigue al lado del puente);
     centro: UTM del centro de la casilla; caja (e0, n0, e1, n1): solo el trozo de cada puente que cae
     dentro (un viaducto largo se reparte entre las casillas que cruza, para que cada trozo cambie de
     detalle con su casilla y no se corte). Devuelve (arrays por textura, (v, tris, mats) o None, n_puentes)."""
     obra = Obra(centro)
     hechos = 0
-    for via in vias:
-        clave = id(via)
-        if clave not in _PERFILES:  # el perfil se calcula con el puente entero, una vez
-            _PERFILES[clave] = perfil(via, relieve)
+    # el perfil se calcula con el puente entero, una vez; primero los de capa más alta (los de debajo los miran)
+    perfiles(vias, relieve)
     # tableros de todas las vías, para que las barreras no se metan en el de al lado
     import shapely
-    tableros, alturas = [], []
+    tableros, enteros, alturas = [], [], []
     for via in vias:
         r = _PERFILES[id(via)]
         if r is not None and via["s"]["tipo"] in ("autopista", "calle"):
             tableros.append(LineString(r[0]).buffer(via["s"]["ancho"] / 2 - 0.4, cap_style="flat"))
+            enteros.append(LineString(r[0]).buffer(via["s"]["ancho"] / 2, cap_style="flat"))
             alturas.append((r[0], r[3], via))
     arbol = shapely.STRtree(tableros) if tableros else None
+    arbol_e = shapely.STRtree(enteros) if enteros else None
+    calzadas = [l.buffer(w / 2, cap_style="flat") for l, w in (a_nivel or []) if l.length > 0]
+    arbol_n = shapely.STRtree(calzadas) if calzadas else None
 
     def otras_de(propia):
-        def otras(xy, z):
-            fuera = np.zeros(len(xy), bool)
-            puntos = shapely.points(xy)
-            ip, it = arbol.query(puntos, predicate="within")
-            for a, b in zip(ip, it):
-                p_o, z_o, via_o = alturas[b]
-                if via_o is propia or fuera[a]:
-                    continue
-                k = np.argmin(((p_o - xy[a]) ** 2).sum(1))
-                fuera[a] = abs(z_o[k] - z[a]) < 1.5
-            return fuera
-        return otras if arbol is not None else None
+        def z_de(b, xy):
+            p_o, z_o, _ = alturas[b]
+            return z_o[np.argmin(((p_o - xy) ** 2).sum(1))]
+
+        def otras(xy, fuera_xy, z):
+            quitar = np.zeros(len(xy), bool)
+            # a ras de suelo (menos de 1 m sobre el terreno) se mira más lejos: entre dos tableros bajos con 1-3 m
+            # de terreno en medio tampoco hace falta barrera (OSM parte una calzada sola en tronco y ramal)
+            hacia = (fuera_xy - xy) / (np.linalg.norm(fuera_xy - xy, axis=1, keepdims=True) + 1e-9)
+            bajo = z - relieve.valor("suelo", xy[:, 0], xy[:, 1]) < 1.0
+            lejos_xy = np.where(bajo[:, None], xy + hacia * 3.3, fuera_xy)
+            if arbol is not None:  # la barrera cae en el tablero de otra vía
+                ip, it = arbol.query(shapely.points(xy), predicate="within")
+                for a, b in zip(ip, it):
+                    if alturas[b][2] is not propia and not quitar[a]:
+                        quitar[a] = abs(z_de(b, xy[a]) - z[a]) < 1.5
+            if arbol_e is not None:  # justo por fuera, otro tablero a la misma altura: es la misma calzada
+                for punto in (fuera_xy, lejos_xy):
+                    ip, it = arbol_e.query(shapely.points(punto), predicate="within")
+                    for a, b in zip(ip, it):
+                        if alturas[b][2] is not propia and not quitar[a]:
+                            quitar[a] = abs(z_de(b, punto[a]) - z[a]) < 0.6
+            if arbol_n is not None:  # justo por fuera, la calle a nivel a la altura del tablero
+                ip = np.unique(arbol_n.query(shapely.points(fuera_xy), predicate="within")[0])
+                if len(ip):
+                    zs = relieve.valor("suelo", fuera_xy[ip, 0], fuera_xy[ip, 1])
+                    quitar[ip] |= np.abs(z[ip] - zs) < 0.6
+            return quitar
+        return otras if (arbol is not None or arbol_n is not None) else None
 
     for via in vias:
         r = _PERFILES[id(via)]
@@ -656,12 +838,13 @@ def construir(vias, relieve, calles, centro, caja=None):
         if via["tags"].get("highway") in ENLACES:  # el enlace, 4 cm por debajo del tronco donde se solapan
             z = z - 0.04
         rangos = [(0, len(ds) - 1)] if caja is None else tramos(pts, caja)
+        otras = otras_de(via)
         for i0, i1 in rangos:
             sl = slice(i0, i1 + 1)
             eje = (pts[sl], der[sl], ds[sl], z[sl])
             _tablero(obra, eje, s)
             _calzada(obra, eje, s)
-            _barreras(obra, eje, s, otras_de(via))
+            _barreras(obra, eje, s, otras)
         if rangos:
             _pilas(obra, (pts, der, ds, z), suelo, s, calles, caja)
             hechos += 1
