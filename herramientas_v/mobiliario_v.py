@@ -41,7 +41,8 @@ PROPS = {
     "jacaranda": ["prop_tree_jacada_01", "prop_tree_jacada_02"],
 }
 ALTURA_PROP = {"palmera": 9.0, "pino": 14.0, "cipres": 11.0, "frondoso": 13.0, "jacaranda": 12.0}
-CIUDAD_QUEDAN = 3  # de cada 10 árboles en la ciudad (con los parques de dentro sale ~60 % menos)
+CIUDAD_QUEDAN = 3  # de cada 40 árboles en la ciudad (2026-11-04: eran 3 de 10 y aún sobraban; un 75 % menos)
+FAROLAS_CADA = 60.0  # m entre farolas que OSM no tiene (eran 30: la mitad)
 DIST = {"arbol": 350.0, "farola": 250.0, "semaforo": 200.0, "otro": 120.0}
 SUBE_ACERA = 0.13  # como la acera de calles_v
 
@@ -161,14 +162,14 @@ def construir(osm, capas, e0h, n1h):
         dx, dy = objetivo[0] - x, objetivo[1] - y
         return float(np.degrees(np.arctan2(-dx, dy)))
 
-    # en la ciudad solo CIUDAD_QUEDAN de cada 10 árboles (había muchos más que en la realidad); en la montaña y
+    # en la ciudad solo CIUDAD_QUEDAN de cada 40 árboles (había muchos más que en la realidad); en la montaña y
     # los parques sin edificios alrededor, todos. Ciudad: más del 10 % de suelo edificado en 150 m.
     urbano = ndimage.uniform_filter(np.isfinite(edif).astype(np.float32), size=301, mode="nearest") > 0.10
 
     def sobra(x, y, semilla):
         fi = int(np.clip((n1h - y) / 0.5, 0, urbano.shape[0] - 1))
         ci = int(np.clip((x - e0h) / 0.5, 0, urbano.shape[1] - 1))
-        return urbano[fi, ci] and (semilla >> 9) % 10 >= CIUDAD_QUEDAN
+        return urbano[fi, ci] and (semilla >> 9) % 40 >= CIUDAD_QUEDAN
 
     # árboles de OSM
     puestos = []
@@ -211,32 +212,38 @@ def construir(osm, capas, e0h, n1h):
             tipo = "pino" if h > 9 and semilla % 3 == 0 else "frondoso"  # en la sierra de Marina abundan los pinos
             poner(tipo, x, y, z_suelo(x, y), semilla % 360, DIST["arbol"],
                   float(np.clip(h / ALTURA_PROP[tipo], 0.4, 1.3)), semilla)
-    # farolas de los viaductos: en el borde derecho del tablero cada 40 m, mirando a la calzada
+    # farolas de los viaductos: en el borde derecho del tablero cada 80 m (eran 40), mirando a la calzada. De pie
+    # en el tablero por dentro de la barrera (antes iban 0,8 m por encima, sobre la New Jersey, y donde no la hay
+    # flotaban), con el mismo perfil que dibuja puentes_v (contando los puentes que pasan por encima)
     rel = puentes_v.Relieve()
-    vias_p = [v for v in puentes_v.vias_puente(osm) if v["s"]["tipo"] in ("autopista", "calle")]
-    puentes_v.extremos_internos(vias_p)
-    for via in vias_p:
+    todas_p = puentes_v.vias_puente(osm)
+    puentes_v.extremos_internos(todas_p, osm)
+    puentes_v._PERFILES.clear()  # los id de otra llamada no valen
+    perfiles_p = puentes_v.perfiles(todas_p, rel)
+    for via, r in zip(todas_p, perfiles_p):
+        if via["s"]["tipo"] not in ("autopista", "calle"):
+            continue
         xy = via["xy"]
         if not any(_en_hoja(q, e0h, n1h) for q in xy[:: max(1, len(xy) // 8)]) and not _en_hoja(xy[-1], e0h, n1h):
             continue
-        r = puentes_v.perfil(via, rel)
         if r is None:
             continue
         pts, der, ds, z, sz = r
         w = via["s"]["ancho"] / 2
+        dentro, sube = (0.8, 0.0) if via["s"]["tipo"] == "autopista" else (0.6, 0.15)  # pie de la barrera / acera
         semilla = zlib.crc32(f"{xy[0][0]:.1f},{xy[0][1]:.1f}".encode())
-        for d in np.arange(8.0 + semilla % 25, ds[-1] - 5, 40.0):
+        for d in np.arange(8.0 + semilla % 25, ds[-1] - 5, 80.0):
             i = int(np.searchsorted(ds, d))
             if z[i] - sz[i] < 3.0:  # tramo en terraplén: ya las pone la calle si las hay
                 continue
-            x, y = pts[i] + der[i] * (w - 0.35)
+            x, y = pts[i] + der[i] * (w - dentro)
             if not _en_hoja((x, y), e0h, n1h):
                 continue
             modelo = _elegir("farola", ok)
             if modelo:
                 gx, gy = config_v.utm_a_juego(x, y)
-                out.append((modelo, (gx, gy, float(z[i]) + 0.8, rumbo_hacia(x, y, pts[i]), 1.0), DIST["farola"]))
-    # farolas que OSM no tiene (en el centro de Barcelona casi ninguna está mapeada): cada 30 m al
+                out.append((modelo, (gx, gy, float(z[i]) + sube, rumbo_hacia(x, y, pts[i]), 1.0), DIST["farola"]))
+    # farolas que OSM no tiene (en el centro de Barcelona casi ninguna está mapeada): cada FAROLAS_CADA m al
     # tresbolillo en el borde de la acera; a los dos lados en las avenidas anchas
     lamparas = [nd["xy"] for nd in osm["nodos"] if nd["tags"].get("highway") == "street_lamp"]
     arbol_l = shapely.STRtree(shapely.points(np.array(lamparas))) if lamparas else None
@@ -250,7 +257,7 @@ def construir(osm, capas, e0h, n1h):
         if t.get("highway") not in con_farola or t.get("bridge") not in (None, "no") or \
                 t.get("tunnel") not in (None, "no"):
             continue
-        for k, d in enumerate(np.arange(12.0, linea.length - 5.0, 30.0)):
+        for k, d in enumerate(np.arange(12.0, linea.length - 5.0, FAROLAS_CADA)):
             a, b = linea.interpolate(max(d - 1, 0)), linea.interpolate(min(d + 1, linea.length))
             tan = np.array([b.x - a.x, b.y - a.y])
             tan /= np.linalg.norm(tan) + 1e-9
@@ -275,6 +282,8 @@ def construir(osm, capas, e0h, n1h):
         hw, am = t.get("highway"), t.get("amenity")
         zs = z_suelo(x, y) + SUBE_ACERA
         if hw == "street_lamp":
+            if zlib.crc32(f"{x:.1f},{y:.1f}".encode()) % 2:  # la mitad de las de OSM (2026-11-04)
+                continue
             v = via_cercana(x, y)
             poner("farola", x, y, zs, rumbo_hacia(x, y, v[0]) if v else 0.0, DIST["farola"])
         elif hw == "traffic_signals":
