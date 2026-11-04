@@ -141,6 +141,8 @@ def construir(osm, capas, e0h, n1h):
             return
         if not libre(x, y, 6 if papel in ALTURA_PROP else 0):  # árboles: copa de ~3 m más de radio
             return
+        if papel == "farola":  # el brazo de prop_streetlight_* sale hacia -Y (caja -2,4..0,5 m): -Y a la calzada
+            rumbo += 180.0
         gx, gy = config_v.utm_a_juego(x, y)
         out.append((modelo, (gx, gy, z, rumbo, escala), dist))
 
@@ -244,7 +246,8 @@ def construir(osm, capas, e0h, n1h):
             modelo = _elegir("farola", ok)
             if modelo:
                 gx, gy = config_v.utm_a_juego(x, y)
-                out.append((modelo, (gx, gy, float(z[i]) + sube, rumbo_hacia(x, y, pts[i]), 1.0), DIST["farola"]))
+                out.append((modelo, (gx, gy, float(z[i]) + sube, rumbo_hacia(x, y, pts[i]) + 180.0, 1.0),
+                            DIST["farola"]))
     # farolas que OSM no tiene (en el centro de Barcelona casi ninguna está mapeada): cada FAROLAS_CADA m al
     # tresbolillo en el borde de la acera; a los dos lados en las avenidas anchas
     lamparas = [nd["xy"] for nd in osm["nodos"] if nd["tags"].get("highway") == "street_lamp"]
